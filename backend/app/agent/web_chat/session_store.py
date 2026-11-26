@@ -5,6 +5,8 @@ No cookies, passwords, browser storage, or provider tokens are read or stored.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import json
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -45,6 +47,41 @@ def save_web_chat_run_context(
                  created_at = excluded.created_at""",
             (run_id, provider, page_id, str(conversation_url or "")[:4096], datetime.now(timezone.utc).isoformat()),
         )
+
+
+def claim_web_chat_action_id(
+    run_id: str, action_id: str, tool_name: str, arguments: dict[str, Any], *,
+    db: Database | None = None,
+) -> bool:
+    """Atomically reserve an action ID for one durable Run.
+
+    This is an at-most-once fence across Run resume/restart. A claimed ID is
+    never silently made reusable after an interrupted or uncertain dispatch.
+    Only a digest of arguments is stored; argument contents are not persisted.
+    """
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("A durable Run ID is required for action idempotency.")
+    if not isinstance(action_id, str) or not action_id or len(action_id) > 96:
+        raise ValueError("The web-chat action ID is invalid.")
+    if not isinstance(tool_name, str) or not tool_name.strip() or len(tool_name) > 256:
+        raise ValueError("The web-chat tool name is invalid.")
+    if not isinstance(arguments, dict):
+        raise ValueError("Web-chat action arguments must be an object.")
+    canonical = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    database = db or get_db()
+    database.init_db()
+    with database.transaction() as conn:
+        exists = conn.execute("SELECT 1 FROM agent_runs WHERE run_id = ?", (run_id,)).fetchone()
+        if exists is None:
+            raise ValueError("Cannot reserve an action ID for an unknown Run.")
+        cursor = conn.execute(
+            """INSERT OR IGNORE INTO web_chat_action_ids
+               (run_id, action_id, tool_name, arguments_sha256, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (run_id, action_id, tool_name, digest, datetime.now(timezone.utc).isoformat()),
+        )
+        return cursor.rowcount == 1
 
 
 def load_web_chat_run_context(run_id: str, *, db: Database | None = None) -> dict[str, Any] | None:
