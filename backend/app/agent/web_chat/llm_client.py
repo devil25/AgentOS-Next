@@ -40,6 +40,19 @@ class WebChatLLMClient:
         self._seen_action_ids: set[str] = set()
         self._call_lock = asyncio.Lock()
 
+    def bind_durable_run(self, durable_run) -> None:
+        """Persist the selected website/page as soon as the durable Run exists."""
+        if not self.run_id:
+            return
+        durable_run_id = str(getattr(durable_run, "run_id", "") or "")
+        if durable_run_id != self.run_id:
+            raise RuntimeError("The web-chat target does not match the active durable Run.")
+        from .session_store import save_web_chat_run_context
+        save_web_chat_run_context(
+            self.run_id, self.web_chat_provider, self.tab_id,
+            conversation_url=self._conversation_url,
+        )
+
     def bind_browser_tool_executor(self, execute_tool) -> None:
         """Attach the per-turn authorized dispatcher supplied by TurnLoop."""
         browser = getattr(self.adapter, "browser", None)
