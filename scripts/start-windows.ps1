@@ -144,6 +144,18 @@ function Start-NpmScriptHidden {
     $npm = (Get-Command npm -ErrorAction Stop).Source
   }
 
+  if ($ScriptName -eq 'dev:electron') {
+    # The Electron executable can be installed even when npm's .bin shim is
+    # missing or broken. Launch the verified binary directly instead of
+    # relying on PATH resolution of the "electron" command.
+    $electronExe = Join-Path $frontendDir 'node_modules\\electron\\dist\\electron.exe'
+    if (-not (Test-Path -LiteralPath $electronExe)) {
+      throw "Electron executable was not found: $electronExe. Run setup.bat to restore frontend dependencies."
+    }
+    $command = '"{0}" . > "{1}" 2>&1' -f $electronExe, $LogPath
+    return Start-Process -FilePath $env:ComSpec -ArgumentList @('/d', '/s', '/c', $command) -WorkingDirectory $frontendDir -WindowStyle Hidden -PassThru
+  }
+
   $extraArgs = if ($ScriptName -eq 'dev:vite') { ' -- --port {0} --strictPort' -f $vitePort } else { '' }
   $command = 'cd /d "{0}" && "{1}" run {2}{3} > "{4}" 2>&1' -f $frontendDir, $npm, $ScriptName, $extraArgs, $LogPath
   return Start-Process -FilePath $env:ComSpec -ArgumentList @('/d', '/s', '/c', $command) -WindowStyle Hidden -PassThru
