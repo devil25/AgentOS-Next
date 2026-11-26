@@ -141,6 +141,16 @@ class WebChatLLMClient:
             call_id = action.action_id
             if call_id in self._seen_action_ids:
                 raise RuntimeError("The web-chat provider repeated an action ID; duplicate execution was blocked.")
+            if self.run_id:
+                from .session_store import claim_web_chat_action_id
+                claimed = claim_web_chat_action_id(
+                    self.run_id, call_id, action.name, action.arguments,
+                )
+                if not claimed:
+                    raise RuntimeError(
+                        "The web-chat provider repeated an action ID already reserved by this durable Run; "
+                        "duplicate execution was blocked, including across resume."
+                    )
             self._seen_action_ids.add(call_id)
             self._last_action_id = call_id
             return LLMResponse(
