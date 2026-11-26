@@ -485,6 +485,9 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    // Show only after Chromium has painted the first frame to avoid a blank flash.
+    // Explicitly showing also makes the app visible when the launcher is started hidden.
+    show: false,
     // On Windows and Linux the renderer draws its own window buttons in the
     // app bar (window:control), so no native caption buttons are shown.
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
@@ -504,13 +507,27 @@ function createWindow() {
     },
   })
 
+  mainWindow.once('ready-to-show', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.show()
+    mainWindow.focus()
+    console.log('[main] AgentOS-Next window shown')
+  })
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[main] Renderer failed to load', { errorCode, errorDescription, validatedURL })
+  })
+
   if (useDevServer) {
-    mainWindow.loadURL('http://localhost:5275')
+    mainWindow.loadURL('http://localhost:5275').catch((err) => {
+      console.error('[main] Failed to load development renderer:', err.message)
+    })
     if (process.env.MONAW_DEVTOOLS === '1') {
       mainWindow.webContents.openDevTools({ mode: 'detach' })
     }
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html')).catch((err) => {
+      console.error('[main] Failed to load packaged renderer:', err.message)
+    })
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
