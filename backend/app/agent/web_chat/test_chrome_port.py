@@ -74,3 +74,16 @@ async def test_inspect_rejects_unsupported_origin():
     port = ChromeWebChatBrowserPort(executor)
     with pytest.raises(WebChatAdapterError, match="supported HTTPS provider"):
         await port.inspect(7)
+
+def test_fixed_web_chat_inspection_is_read_only_and_never_reads_credentials():
+    from app.skills.browser_use.extension.web_chat_inspection import WEB_CHAT_INSPECTION
+
+    for host in ("chatgpt.com", "gemini.google.com", "chat.deepseek.com", "chat.z.ai"):
+        assert host in WEB_CHAT_INSPECTION
+    assert "querySelectorAll(selector)" in WEB_CHAT_INSPECTION
+    assert "data-message-id" in WEB_CHAT_INSPECTION
+    assert "data-turn-id" in WEB_CHAT_INSPECTION
+    assert "document.cookie" not in WEB_CHAT_INSPECTION
+    assert "localStorage" not in WEB_CHAT_INSPECTION
+    assert "sessionStorage" not in WEB_CHAT_INSPECTION
+    assert "eval(" not in WEB_CHAT_INSPECTION
