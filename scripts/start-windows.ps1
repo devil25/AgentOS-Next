@@ -153,7 +153,8 @@ function Start-NpmScriptHidden {
       throw "Electron executable was not found: $electronExe. Run setup.bat to restore frontend dependencies."
     }
     $stderrLogPath = "$LogPath.stderr"
-    return Start-Process -FilePath $electronExe -ArgumentList @('.') -WorkingDirectory $frontendDir -RedirectStandardOutput $LogPath -RedirectStandardError $stderrLogPath -WindowStyle Hidden -PassThru
+    # Electron owns the interactive desktop window; do not inherit a hidden startup state.
+    return Start-Process -FilePath $electronExe -ArgumentList @('.') -WorkingDirectory $frontendDir -RedirectStandardOutput $LogPath -RedirectStandardError $stderrLogPath -WindowStyle Normal -PassThru
   }
 
   $extraArgs = if ($ScriptName -eq 'dev:vite') { ' -- --port {0} --strictPort' -f $vitePort } else { '' }
