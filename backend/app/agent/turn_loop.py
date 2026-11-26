@@ -177,6 +177,9 @@ class TurnLoop:
     ) -> None:
         """Run the react loop, pushing all events into the queue. Caller is responsible for the None sentinel."""
         active_client = reasoning_client or self.llm_client
+        bind_durable_run = getattr(active_client, "bind_durable_run", None)
+        if callable(bind_durable_run):
+            bind_durable_run(lifecycle.durable_run)
         context_token = set_current_conversation_id(conversation_id)
         tool_scope_token = set_tool_scope(uuid.uuid4().hex)
         obs_run_id = ""
