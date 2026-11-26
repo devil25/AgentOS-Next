@@ -148,7 +148,7 @@ function Start-NpmScriptHidden {
     # The Electron executable can be installed even when npm's .bin shim is
     # missing or broken. Launch the verified binary directly instead of
     # relying on PATH resolution of the "electron" command.
-    $electronExe = Join-Path $frontendDir 'node_modules\\electron\\dist\\electron.exe'
+    $electronExe = Join-Path $frontendDir 'node_modules\electron\dist\electron.exe'
     if (-not (Test-Path -LiteralPath $electronExe)) {
       throw "Electron executable was not found: $electronExe. Run setup.bat to restore frontend dependencies."
     }
