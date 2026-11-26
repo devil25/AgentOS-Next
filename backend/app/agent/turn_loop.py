@@ -173,8 +173,10 @@ class TurnLoop:
         steering: SteeringInbox | None = None,
         *,
         lifecycle: TurnLifecycle,
+        reasoning_client=None,
     ) -> None:
         """Run the react loop, pushing all events into the queue. Caller is responsible for the None sentinel."""
+        active_client = reasoning_client or self.llm_client
         context_token = set_current_conversation_id(conversation_id)
         tool_scope_token = set_tool_scope(uuid.uuid4().hex)
         obs_run_id = ""
@@ -193,7 +195,7 @@ class TurnLoop:
         turn_thinking_parts: list[str] = []
         persisted_user_ids: list[int] = []
         obs_usage_total = UsageStats()
-        model_budget = ModelUsageBudget(self.max_tokens_per_turn) if isinstance(self.llm_client, LLMClient) else None
+        model_budget = ModelUsageBudget(self.max_tokens_per_turn) if isinstance(active_client, LLMClient) else None
         usage_token = current_model_budget.set(model_budget)
 
         def _turn_usage() -> UsageStats:
@@ -201,9 +203,9 @@ class TurnLoop:
             return model_budget.usage if model_budget is not None else obs_usage_total
 
         budget = self._new_turn_budget()
-        observer = TurnObserver(self.observability, conversation_id=conversation_id, client=self.llm_client)
+        observer = TurnObserver(self.observability, conversation_id=conversation_id, client=active_client)
         _obs_event, _obs_error = observer.event, observer.error
-        transcript = TurnTranscript(provider=str(getattr(self.llm_client, "provider", "") or ""))
+        transcript = TurnTranscript(provider=str(getattr(active_client, "provider", "") or ""))
         response_policy = TurnResponsePolicy()
         task_progress = None
 
@@ -246,14 +248,19 @@ class TurnLoop:
 
         tool_runner = ToolBatchRunner(
             registry=self.registry, executor=self.executor, execution_gate=self.execution_gate,
-            memory=self.memory, client=self.llm_client, budget=budget, transcript=transcript,
+            memory=self.memory, client=active_client, review_client=self.llm_client,
+            budget=budget, transcript=transcript,
             lifecycle=lifecycle, observer=observer, steering=steering,
             user_request=_current_user_request, progress=lambda: latest_progress_text,
             max_parallel=self.max_parallel_tool_calls, max_identical_calls=self.max_identical_calls,
             stuck_rounds_limit=self.STUCK_ROUNDS_LIMIT, guard_blocks_limit=self.GUARD_BLOCKS_LIMIT,
         )
+        bind_browser_tool_executor = getattr(active_client, "bind_browser_tool_executor", None)
+        if callable(bind_browser_tool_executor):
+            bind_browser_tool_executor(tool_runner.execute_transport_tool)
+
         model_runner = ModelRequestRunner(
-            self.llm_client, timeout_seconds=self.max_llm_call_seconds, observer=observer, emit=_put,
+            active_client, timeout_seconds=self.max_llm_call_seconds, observer=observer, emit=_put,
             on_request=lambda: _transition(run_state.model_call),
         )
 
@@ -319,7 +326,7 @@ class TurnLoop:
                     )
                     provider_history_kwargs["provider_history"] = {
                         "provider": "gemini",
-                        "model_name": str(getattr(self.llm_client, "model_name", "") or ""),
+                        "model_name": str(getattr(active_client, "model_name", "") or ""),
                         "messages": transcript.current_turn_messages,
                     }
                 persisted_ids = await persist_turn(
@@ -363,8 +370,8 @@ class TurnLoop:
                 conversation_id=conversation_id,
                 user_message=message,
                 source=infer_source(conversation_id),
-                model=str(getattr(self.llm_client, "model_name", "") or ""),
-                provider=str(getattr(self.llm_client, "provider", "") or ""),
+                model=str(getattr(active_client, "model_name", "") or ""),
+                provider=str(getattr(active_client, "provider", "") or ""),
                 metadata={"attachment_count": len(attachments or [])},
             )
             lifecycle.run_id = observer.run_id = obs_run_id
@@ -421,7 +428,7 @@ class TurnLoop:
             if isinstance(self.memory, MemoryManager):
                 history_kwargs = {
                     "provider": transcript.provider,
-                    "model_name": str(getattr(self.llm_client, "model_name", "") or ""),
+                    "model_name": str(getattr(active_client, "model_name", "") or ""),
                 }
             transcript.messages = self.memory.build_llm_messages(conversation_id, **history_kwargs)
             durable_run = lifecycle.durable_run
@@ -968,6 +975,7 @@ class TurnLoop:
         steering: SteeringInbox | None = None,
         durable_run=None,
         durable_run_factory=None,
+        reasoning_client=None,
     ) -> AsyncIterator[dict]:
         async with _SESSION_LOCKS[conversation_id]:
             if durable_run is None and callable(durable_run_factory):
@@ -987,7 +995,7 @@ class TurnLoop:
             worker_task = asyncio.create_task(lifecycle.drive(
                 self._react_worker(
                     message, conversation_id, system_prompt, publisher, attachments,
-                    steering=steering, lifecycle=lifecycle,
+                    steering=steering, lifecycle=lifecycle, reasoning_client=reasoning_client,
                 ),
                 timeout_seconds=self.max_turn_seconds,
             ))

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-ProviderId = Literal["openai", "gemini", "codex"]
+ProviderId = Literal["openai", "gemini", "codex", "openai_compatible"]
 OptionalProviderId = ProviderId | Literal[""]
 
 
@@ -18,15 +19,24 @@ class ModelConnection:
     protocol: str
     models: tuple[str, ...]
     api_key_attribute: str = ""
+    requires_base_url: bool = False
 
     def api_key(self, settings: Any) -> str:
         """Resolve credentials internally without including them in the catalog."""
         return str(getattr(settings, self.api_key_attribute, "") or "") if self.api_key_attribute else ""
 
-    def readiness(self, settings: Any, *, account_connected: bool = False) -> tuple[bool, str]:
-        """Report configured credentials, not network or entitlement availability."""
-        ready = bool(self.api_key(settings).strip()) if self.api_key_attribute else account_connected
-        reason = "Add an API key in Settings." if self.api_key_attribute else "Sign in to your ChatGPT account in Settings."
+    def readiness(self, settings: Any, *, account_connected: bool = False, base_url: str = "") -> tuple[bool, str]:
+        """Report locally configured credentials, not live service availability."""
+        key = self.api_key(settings).strip() if self.api_key_attribute else ""
+        local_endpoint = bool(self.requires_base_url and str(base_url or "").strip().lower().startswith("http://"))
+        key_required = bool(self.api_key_attribute) and not local_endpoint
+        ready = bool(key) if key_required else (True if self.requires_base_url else account_connected)
+        if self.requires_base_url and not str(base_url or "").strip():
+            ready, reason = False, "Add an API base URL in Settings."
+        elif key_required and not key:
+            ready, reason = False, "Add an API key in Settings."
+        else:
+            reason = ""
         return ready, "" if ready else reason
 
 
@@ -53,11 +63,21 @@ MODEL_LABELS = {
     "gemini-4-hydrogen": "Gemini 4 Hydrogen",
     "gemini-4-carbon": "Gemini 4 Carbon",
     "gemini-4-argon": "Gemini 4 Argon",
+    "deepseek-flash": "DeepSeek V4.1 Flash",
+    "deepseek-v4-pro": "DeepSeek V4 Pro",
+    "glm-5.3": "GLM-5.3",
+    "glm-5.3-flash": "GLM-5.3 Flash",
+    "glm-5.4": "GLM-5.4",
+    "openrouter/free": "OpenRouter Free Router",
 }
 CONNECTIONS = {
     "openai": ModelConnection("openai", "OpenAI API", "openai_responses", OPENAI_MODELS, "openai_api_key"),
     "codex": ModelConnection("codex", "OpenAI account", "chatgpt_account", OPENAI_MODELS),
     "gemini": ModelConnection("gemini", "Google", "gemini_generate_content", GEMINI_MODELS, "google_api_key"),
+    "openai_compatible": ModelConnection(
+        "openai_compatible", "OpenAI-compatible API", "openai_chat_completions", (),
+        "compatible_api_key", requires_base_url=True,
+    ),
 }
 
 
@@ -69,10 +89,19 @@ def get_connection(connection_id: str) -> ModelConnection:
         raise ValueError(f"Unsupported model connection: {connection_id!r}.") from exc
 
 
-def reasoning_efforts(connection_id: str, model_name: str) -> list[str]:
-    """Return supported controls for known models; unknown models expose none."""
+def reasoning_efforts(connection_id: str, model_name: str, base_url: str = "") -> list[str]:
+    """Return documented controls for known models; unknown models expose none."""
     connection = get_connection(connection_id)
     model = model_name.lower()
+    if connection.protocol == "openai_chat_completions":
+        hostname = (urlsplit(base_url).hostname or "").lower() if base_url else ""
+        if hostname == "api.deepseek.com" and model in {"deepseek-flash", "deepseek-v4-pro"}:
+            return ["none", "low", "medium", "high", "max"]
+        if hostname == "api.z.ai" and model.startswith(("glm-5.3", "glm-5.3-flash")):
+            return ["low", "medium", "high", "max"]
+        if hostname == "api.z.ai" and model.startswith("glm-5.2"):
+            return ["none", "low", "medium", "high", "max"]
+        return []  # Unknown compatibility endpoints expose no guessed controls.
     if connection.protocol == "gemini_generate_content":
         if model in {"gemini-4-neon", "gemini-4-hydrogen"}:
             return ["low", "medium", "high", "xhigh"]
@@ -93,10 +122,10 @@ def reasoning_efforts(connection_id: str, model_name: str) -> list[str]:
     return []
 
 
-def normalize_reasoning_effort(connection_id: str, model_name: str, effort: str) -> str:
+def normalize_reasoning_effort(connection_id: str, model_name: str, effort: str, base_url: str = "") -> str:
     """Normalize known controls while retaining explicit choices for unknown models."""
     effort = "max" if effort == "ultra" else effort
-    levels = reasoning_efforts(connection_id, model_name)
+    levels = reasoning_efforts(connection_id, model_name, base_url)
     if not levels or effort in levels:
         return effort
     if effort == "minimal" and "low" in levels:
@@ -121,5 +150,15 @@ def initialize_provider_client(client: Any) -> None:
         client._openai_client = AsyncOpenAI(api_key=client.api_key, max_retries=0)
     elif protocol == "chatgpt_account":
         client._chatgpt_token = ""
+    elif protocol == "openai_chat_completions":
+        from openai import AsyncOpenAI
+
+        if not client.base_url:
+            raise ValueError("OpenAI-compatible API requires an API base URL in Settings.")
+        client._openai_client = AsyncOpenAI(
+            api_key=client.api_key or "local-openai-compatible",
+            base_url=client.base_url,
+            max_retries=0,
+        )
     else:
         raise ValueError(f"Unsupported model protocol: {protocol!r}.")

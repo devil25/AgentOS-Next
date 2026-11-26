@@ -18,6 +18,15 @@ class ChatRequest(BaseModel):
     run_id: Optional[str] = None
     workspace_dir: str | None = Field(default=None, max_length=4096)
     attachments: list["AttachmentRef"] = Field(default_factory=list)
+    # Optional reasoning engine backed by the user's already-authenticated Chrome tab.
+    web_chat_provider: Literal["chatgpt", "gemini", "deepseek", "zai"] | None = None
+    web_chat_page_id: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_web_chat_target(self):
+        if (self.web_chat_provider is None) != (self.web_chat_page_id is None):
+            raise ValueError("web_chat_provider and web_chat_page_id must be supplied together")
+        return self
 
     @field_validator("conversation_id", "run_id")
     @classmethod
@@ -256,8 +265,9 @@ class PermissionProfilePayload(BaseModel):
 
 
 class LLMSettingsPayload(BaseModel):
-    provider: str = Field("openai", pattern="^(openai|gemini|codex)$")
+    provider: str = Field("openai", pattern="^(openai|gemini|codex|openai_compatible)$")
     model_name: str = DEFAULT_OPENAI_CHAT_MODEL
+    compatible_base_url: str = Field("", max_length=2048)
     reasoning_effort: str = Field("medium", pattern="^(none|minimal|low|medium|high|xhigh|max)$")
     max_iterations_per_turn: int = Field(0, ge=0, le=500)
     custom_models: dict[str, list[str]] = Field(default_factory=dict)
@@ -408,6 +418,7 @@ class IdentitySettingsPayload(BaseModel):
 class ApiKeyStatusPayload(BaseModel):
     has_openai_key: bool
     has_google_key: bool
+    has_compatible_key: bool = False
     has_tavily_key: bool = False
     has_telegram_bot_token: bool = False
     has_telegram_allowlist: bool = False
@@ -444,7 +455,7 @@ class ModelProviderOptionPayload(BaseModel):
     # Display names and supported reasoning levels, where the provider lists them.
     labels: dict[str, str] = Field(default_factory=dict)
     reasoning_efforts: dict[str, list[str]] = Field(default_factory=dict)
-    # "account" when the list came from the signed-in ChatGPT account.
+    # "account" for ChatGPT; "endpoint" for discovered compatible API models.
     source: str = "built_in"
 
 
@@ -483,9 +494,10 @@ class SettingsUpdate(BaseModel):
     sandbox: Optional[SandboxSettingsPayload] = None
     identity: Optional[IdentitySettingsPayload] = None
     execution_detail: Optional[Literal["simple", "detailed", "developer"]] = None
-    model_provider: Optional[str] = Field(None, pattern="^(openai|gemini|codex)$")
+    model_provider: Optional[str] = Field(None, pattern="^(openai|gemini|codex|openai_compatible)$")
     openai_api_key: Optional[str] = None
     google_api_key: Optional[str] = None
+    compatible_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None
     telegram_bot_token: Optional[str] = None
     telegram_allowed_user_ids: Optional[str] = None

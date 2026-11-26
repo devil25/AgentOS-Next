@@ -58,7 +58,7 @@ const OVERLAP_OPTIONS: Array<{
 interface Props {
   task?: ScheduledTask | null
   defaultWorkspace?: string
-  defaultModel?: { provider: 'openai' | 'gemini' | 'codex'; model_name: string; reasoning_effort: string }
+  defaultModel?: ModelSelection
   onClose: () => void
   onSaved: () => void
   onRunConversation: (conversationId: string) => void

@@ -214,7 +214,7 @@ try {
   $electronProcess = Start-NpmScriptHidden -ScriptName 'dev:electron' -LogPath $electronLog
   Wait-ForEndpoint -Name 'Backend' -Url $backendHealthUrl -TimeoutSeconds 90 -Process $electronProcess
 
-  Write-Host "Monaw Agent started successfully. Logs: $launcherLogDir"
+  Write-Host "AgentOS-Next started successfully. Logs: $launcherLogDir"
   Hide-ConsoleIfExplorerLaunched
   exit 0
 } catch {

@@ -1,5 +1,5 @@
 {
-  "name": "monaw-agent",
+  "name": "agentos-next",
   "version": "1.2.0",
   "private": true,
   "type": "module",
@@ -55,12 +55,12 @@
     "vitest": "^4.1.4"
   },
   "build": {
-    "appId": "com.monaw.agent",
-    "productName": "Monaw",
+    "appId": "com.agentos.next",
+    "productName": "AgentOS-Next",
     "publish": {
       "provider": "github",
-      "owner": "kailiang0120",
-      "repo": "monaw",
+      "owner": "devil25",
+      "repo": "AgentOS-Next",
       "releaseType": "release"
     },
     "directories": {
@@ -111,7 +111,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "Monaw-Setup-${version}-x64.${ext}"
+      "artifactName": "AgentOS-Next-Setup-${version}-x64.${ext}"
     },
     "electronLanguages": [
       "en-US"

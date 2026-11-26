@@ -36,7 +36,7 @@ let CONTROL_PROFILE_ID = null
 const BACKEND_RESTART_EXIT_CODE = 78
 const isDev = !app.isPackaged
 const useDevServer = useDevelopmentRenderer(app.isPackaged)
-const APP_USER_MODEL_ID = 'com.monaw.agent'
+const APP_USER_MODEL_ID = 'com.agentos.next'
 const LEGACY_USER_DATA_DIR_NAMES = ['AI Agent', 'ai-agent']
 const APP_THEME_COLORS = {
   dark: '#111b13',
@@ -209,6 +209,7 @@ function reportStartupFailure(reason, logPath = path.join(getBackendRuntimeDir()
     },
   })
 }
+app.setName('AgentOS-Next')
 if (process.platform === 'win32') {
   app.setAppUserModelId(APP_USER_MODEL_ID)
 }
@@ -562,7 +563,7 @@ app.whenReady().then(async () => {
     publish: (state) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('updates:state', state)
       if (state.status === 'ready' && Notification.isSupported()) {
-        const notice = new Notification({ title: 'Monaw update ready', body: `Version ${state.latestVersion} is ready. Open Settings > About to install it.` })
+        const notice = new Notification({ title: 'AgentOS-Next update ready', body: `Version ${state.latestVersion} is ready. Open Settings > About to install it.` })
         notice.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus() } })
         notice.show()
       }

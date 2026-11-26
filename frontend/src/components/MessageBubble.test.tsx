@@ -36,8 +36,8 @@ describe('MessageBubble', () => {
     )
 
     expect(screen.getByText('Acme overview')).toBeInTheDocument()
-    expect(screen.getByRole('article', { name: 'Monaw response' })).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: 'Monaw mascot' })).toHaveAttribute('src', expect.stringMatching(/success\.gif/))
+    expect(screen.getByRole('article', { name: 'AgentOS-Next response' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'AgentOS-Next mascot' })).toHaveAttribute('src', expect.stringMatching(/success\.gif/))
   })
 
   it('shows exact approval scope and preserves the request if approval fails', async () => {
@@ -131,12 +131,12 @@ describe('MessageBubble', () => {
     const { rerender } = render(<MessageBubble message={{
       id: 'msg-mascot', role: 'assistant', content: '', streaming: true,
     }} />)
-    expect(screen.getByRole('img', { name: 'Monaw mascot' })).toHaveAttribute('src', expect.stringMatching(/thinking\.gif/))
+    expect(screen.getByRole('img', { name: 'AgentOS-Next mascot' })).toHaveAttribute('src', expect.stringMatching(/thinking\.gif/))
 
     rerender(<MessageBubble message={{
       id: 'msg-mascot', role: 'assistant', content: 'Done.', streaming: false,
     }} />)
-    expect(screen.getByRole('img', { name: 'Monaw mascot' })).toHaveAttribute('src', expect.stringMatching(/success\.gif/))
+    expect(screen.getByRole('img', { name: 'AgentOS-Next mascot' })).toHaveAttribute('src', expect.stringMatching(/success\.gif/))
   })
 
   it('uses the configured agent name for assistant messages', () => {
@@ -450,7 +450,7 @@ const answer = 42
     const lists = screen.getAllByRole('list', { name: 'Tool calls' })
     expect(lists).toHaveLength(2)
     expect(screen.getAllByRole('listitem')).toHaveLength(2)
-    const transcript = screen.getByRole('article', { name: 'Monaw response' }).textContent ?? ''
+    const transcript = screen.getByRole('article', { name: 'AgentOS-Next response' }).textContent ?? ''
     expect(transcript.indexOf('Opening the browser.')).toBeLessThan(transcript.indexOf('Used browser'))
     expect(transcript.indexOf('Used browser')).toBeLessThan(transcript.indexOf('Inspecting the page.'))
 

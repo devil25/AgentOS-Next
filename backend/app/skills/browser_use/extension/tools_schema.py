@@ -294,6 +294,12 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "readOnly": False,
     },
     {
+        "name": "inspect_web_chat",
+        "description": "Fixed read-only inspection of a supported signed-in web-chat page. Returns visible assistant messages only when the page exposes stable message IDs; never executes caller-supplied JavaScript or reads credentials.",
+        "inputSchema": _schema({"pageId": _PAGE_ID}, ["pageId"]),
+        "readOnly": True,
+    },
+    {
         "name": "list_console_messages",
         "description": "List all console messages for the currently selected page since the last navigation.",
         "inputSchema": _schema({

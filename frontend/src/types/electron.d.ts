@@ -1,6 +1,6 @@
 export {}
 
-type CredentialId = 'openai' | 'google' | 'tavily' | 'telegramBot'
+type CredentialId = 'openai' | 'google' | 'compatible' | 'tavily' | 'telegramBot'
 type CredentialStatus = Record<CredentialId, boolean>
 
 declare global {

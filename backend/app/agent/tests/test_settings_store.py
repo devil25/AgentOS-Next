@@ -596,6 +596,7 @@ def test_api_payload_exposes_key_status_without_secret_values():
     payload = api_settings_payload(base, AgentSettings())
 
     assert payload["api_keys"]["has_google_key"] is True
+    assert payload["api_keys"]["has_compatible_key"] is False
     assert "has_deepseek_key" not in payload["api_keys"]
     assert payload["api_keys"]["has_tavily_key"] is True
     assert payload["api_keys"]["has_telegram_allowlist"] is True
@@ -751,6 +752,76 @@ def test_settings_keep_any_valid_model_name_and_clean_custom_models():
         "openai": [" gpt-6-mini ", "gpt-6-mini", "bad name", ""], "gemini": ["models/gemini-exp"], "other": ["x"],
     }).custom_models
     assert cleaned == {"openai": ["gpt-6-mini"], "gemini": ["models/gemini-exp"]}
+
+
+def test_compatible_endpoint_settings_validate_urls_and_keep_custom_model_ids():
+    """Remote endpoints require HTTPS and the model id stays user supplied."""
+    from pydantic import ValidationError
+
+    assert LLMSettings(
+        provider="openai_compatible",
+        model_name="deepseek-chat",
+        compatible_base_url="https://api.example.test/v1/",
+        custom_models={"openai_compatible": ["deepseek-chat"]},
+    ).compatible_base_url == "https://api.example.test/v1"
+    assert LLMSettings(
+        provider="openai_compatible",
+        model_name="local-model",
+        compatible_base_url="http://127.0.0.1:1234/v1",
+    ).model_name == "local-model"
+    for url in (
+        "http://api.example.test/v1",
+        "ftp://api.example.test/v1",
+        "https://user:password@example.test/v1",
+        "https://example.test/v1?token=secret",
+    ):
+        with pytest.raises(ValidationError):
+            LLMSettings(provider="openai_compatible", compatible_base_url=url)
+
+
+def test_compatible_endpoint_is_in_runtime_namespace_and_catalog_readiness(monkeypatch):
+    """Credential, endpoint, and model selection share one registered connection."""
+    from app.agent.model_catalog import model_options_payload
+    from app.agent.model_registry import get_connection
+
+    settings = _base_settings()
+    settings.compatible_api_key = "test-compatible-key"
+    llm = LLMSettings(
+        provider="openai_compatible",
+        model_name="provider-model",
+        compatible_base_url="https://api.example.test/v1",
+        custom_models={"openai_compatible": ["provider-model"]},
+    )
+    agent = AgentSettings(llm=llm)
+    runtime = build_runtime_namespace(settings, agent)
+    assert runtime.compatible_api_key == "test-compatible-key"
+    assert runtime.llm.compatible_base_url == "https://api.example.test/v1"
+    assert get_connection("openai_compatible").readiness(
+        settings, base_url=runtime.llm.compatible_base_url,
+    ) == (True, "")
+    providers = {item["id"]: item for item in model_options_payload(
+        llm.custom_models, settings=settings, compatible_base_url=runtime.llm.compatible_base_url,
+    )["providers"]}
+    assert providers["openai_compatible"]["available"] is True
+    assert providers["openai_compatible"]["models"] == ["provider-model"]
+    assert providers["openai_compatible"]["reasoning_efforts"]["provider-model"] == []
+
+
+def test_local_compatible_endpoint_can_run_without_an_api_key():
+    from app.agent.model_registry import get_connection
+
+    settings = _base_settings()
+    settings.compatible_api_key = ""
+    connection = get_connection("openai_compatible")
+
+    assert connection.readiness(settings, base_url="http://127.0.0.1:1234/v1") == (True, "")
+    assert connection.readiness(settings, base_url="http://localhost:1234/v1") == (True, "")
+    assert connection.readiness(settings, base_url="https://api.example.test/v1") == (
+        False, "Add an API key in Settings.",
+    )
+    assert connection.readiness(settings, base_url="") == (
+        False, "Add an API base URL in Settings.",
+    )
 
 
 def test_model_registry_exposes_readiness_without_credentials_or_guessed_capabilities(monkeypatch):

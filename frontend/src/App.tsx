@@ -34,7 +34,7 @@ import type { OperationResolution, RunOperation } from './lib/api/runs'
 import { composerRunControl } from './lib/runControl'
 import { subscribeServerEvents, type ServerEvent } from './lib/api/serverEvents'
 import { DEFAULT_AGENT_NAME, resolveAgentName } from './lib/identity'
-import type { AgentSettings, Conversation, ScheduledTask, UploadedAttachment } from './lib/api/types'
+import type { AgentSettings, Conversation, ScheduledTask, UploadedAttachment, WebChatTarget } from './lib/api/types'
 
 type ApprovalMode = AgentSettings['permissions']['mode']
 type ThemeMode = 'dark' | 'light'
@@ -506,16 +506,19 @@ export default function App() {
     }
   }
 
-  const handleSend = (text: string, attachments: UploadedAttachment[] = []) => {
+  const handleSend = (text: string, attachments: UploadedAttachment[] = [], webChatTarget?: WebChatTarget) => {
     if (savingWorkspace) return
     const generation = workspaceGenerationRef.current
-    sendMessage(text, attachments, (newConvId) => {
+    const onConversationCreated = (newConvId: string) => {
       if (generation !== workspaceGenerationRef.current) return
       workspaceGenerationRef.current += 1
       activeConvIdRef.current = newConvId
       setActiveConvId(newConvId)
       loadConversations()
-    }, activeConvId ? undefined : draftWorkspaceDir || undefined)
+    }
+    const workspaceDir = activeConvId ? undefined : draftWorkspaceDir || undefined
+    if (webChatTarget) sendMessage(text, attachments, onConversationCreated, workspaceDir, undefined, webChatTarget)
+    else sendMessage(text, attachments, onConversationCreated, workspaceDir)
   }
 
   // A new chat gets its id from the server while its first reply runs.
@@ -525,7 +528,7 @@ export default function App() {
     const item = chatQueue.find((entry) => entry.id === id)
     if (!item || isStreaming) return
     removeQueued(id)
-    handleSend(item.text, item.attachments)
+    handleSend(item.text, item.attachments, item.webChatTarget)
   }
 
   // Queued messages run one at a time, each once the turn before it ends.

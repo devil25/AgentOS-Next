@@ -15,6 +15,7 @@ import mimetypes
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlsplit
 
 from app.agent.harness.tool_protocol import ToolCallResult
 from app.agent import llm_provider_requests as provider_requests
@@ -166,11 +167,27 @@ def _tool_output_response_payload(output: str) -> dict:
 
 
 def build_tool_result_message(result: ToolCallResult, *, provider: str = "") -> dict:
+    if str(provider or "").lower() == "web_chat":
+        return {
+            "role": "user",
+            "content": f"AgentOS tool result for {result.name}: {result.output}",
+            "tool_result": True,
+            "web_chat_action_result": True,
+        }
+
     if str(provider or "").lower() in {"openai", "codex"}:
         return {
             "type": "function_call_output",
             "call_id": result.call_id,
             "output": result.output,
+        }
+
+    if str(provider or "").lower() == "openai_compatible":
+        return {
+            "role": "tool",
+            "tool_call_id": result.call_id,
+            "name": result.name,
+            "content": result.output,
         }
 
     message = {
@@ -192,11 +209,15 @@ def build_tool_result_message(result: ToolCallResult, *, provider: str = "") -> 
 # ---------------------------------------------------------------------------
 
 
-def _model_supports_vision(provider: str, model_name: str) -> bool:
+def _model_supports_vision(provider: str, model_name: str, base_url: str = "") -> bool:
     provider_name = provider.lower()
     model = model_name.lower()
     if provider_name == "gemini":
         return model.startswith("gemini")
+    if provider_name == "openai_compatible":
+        # DeepSeek documents vision support for deepseek-flash, but not v4-pro.
+        hostname = (urlsplit(base_url).hostname or "").lower() if base_url else ""
+        return hostname == "api.deepseek.com" and model == "deepseek-flash"
     if provider_name == "openai":
         return model.startswith(("gpt-4", "gpt-5", "gpt-6", "o1", "o3", "o4"))
     return True
@@ -352,7 +373,7 @@ class LLMClient:
         self.reasoning_effort = reasoning_effort
         self._openai_client = None
         self._genai_client = None
-        self._supports_vision = _model_supports_vision(self.provider, self.model_name)
+        self._supports_vision = _model_supports_vision(self.provider, self.model_name, self.base_url)
 
         from app.agent.model_registry import initialize_provider_client
 
@@ -681,6 +702,227 @@ class LLMClient:
             usage=usage,
             provider_finish_reason=terminal_reason,
         )
+
+    # ------------------------------------------------------------------
+    # OpenAI-compatible Chat Completions implementation
+    # ------------------------------------------------------------------
+
+    async def _openai_chat_completions(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        system_prompt: str,
+        stream_callback: Callable[[str], Awaitable[None]] | None,
+        tool_choice: str | dict | None = None,
+        reasoning_callback: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        """Call the portable Chat Completions protocol for custom endpoints."""
+        kwargs = provider_requests.openai_chat_completions_kwargs(
+            model_name=self.model_name,
+            messages=messages,
+            tools=tools,
+            system_prompt=system_prompt,
+            tool_choice=tool_choice,
+            include_images=self._supports_vision,
+        )
+        hostname = (urlsplit(self.base_url).hostname or "").lower() if self.base_url else ""
+        if hostname == "api.deepseek.com":
+            thinking_enabled = self.reasoning_effort not in {"none"}
+            extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+            if thinking_enabled:
+                effort = {
+                    "minimal": "low",
+                    "low": "low",
+                    "medium": "high",
+                    "high": "high",
+                    "xhigh": "max",
+                    "max": "max",
+                    "ultra": "max",
+                }.get(self.reasoning_effort, "high")
+                extra_body["reasoning_effort"] = effort
+                # DeepSeek rejects forced tool selection while thinking is enabled.
+                if kwargs.get("tool_choice") == "required" or isinstance(kwargs.get("tool_choice"), dict):
+                    kwargs["tool_choice"] = "auto"
+            kwargs["extra_body"] = extra_body
+        elif hostname == "api.z.ai":
+            model = self.model_name.lower()
+            always_thinks = model.startswith(("glm-5.3", "glm-5.3-flash"))
+            thinking_enabled = always_thinks or self.reasoning_effort not in {"none"}
+            extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+            if thinking_enabled and model.startswith(("glm-5.2", "glm-5.3")):
+                effort = {
+                    "none": "low",
+                    "minimal": "low",
+                    "low": "low",
+                    "medium": "high",
+                    "high": "high",
+                    "xhigh": "max",
+                    "max": "max",
+                    "ultra": "max",
+                }.get(self.reasoning_effort, "high")
+                extra_body["reasoning_effort"] = effort
+            # Z.ai's Chat Completions interface documents automatic tool choice.
+            if kwargs.get("tools") and kwargs.get("tool_choice") != "auto":
+                kwargs["tool_choice"] = "auto"
+            kwargs["extra_body"] = extra_body
+        if stream_callback is not None or reasoning_callback is not None:
+            return await self._openai_chat_completions_stream(kwargs, stream_callback, reasoning_callback)
+        return await self._openai_chat_completions_no_stream(kwargs)
+
+    @staticmethod
+    def _chat_completion_finish_reason(reason: str, *, has_tool_calls: bool = False) -> str:
+        if reason == "tool_calls":
+            return "tool_calls" if has_tool_calls else "incomplete"
+        if reason == "stop":
+            return "stop"
+        if reason == "length":
+            return "length"
+        if reason == "content_filter":
+            return "blocked"
+        return "incomplete"
+
+    def _parse_chat_completion_tool_calls(self, raw_calls: list[Any]) -> tuple[list[ToolCallRequest], list[dict], bool]:
+        parsed: list[ToolCallRequest] = []
+        provider_calls: list[dict] = []
+        for raw in raw_calls:
+            call_id = str(_obj_get(raw, "id", "") or "").strip()
+            function = _obj_get(raw, "function", {})
+            name = str(_obj_get(function, "name", "") or "").strip()
+            arguments_text = _obj_get(function, "arguments", "{}")
+            if not call_id or not name or not isinstance(arguments_text, str):
+                return [], [], False
+            try:
+                arguments = json.loads(arguments_text or "{}")
+            except json.JSONDecodeError:
+                return [], [], False
+            if not isinstance(arguments, dict):
+                return [], [], False
+            parsed.append(ToolCallRequest(call_id=call_id, tool_name=name, arguments=arguments))
+            provider_calls.append({
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": arguments_text or "{}"},
+            })
+        return parsed, provider_calls, True
+
+    async def _openai_chat_completions_no_stream(self, kwargs: dict) -> LLMResponse:
+        response = await self._openai_client.chat.completions.create(**kwargs)
+        choices = _obj_get(response, "choices", []) or []
+        if not choices:
+            raise ResponseInterruptedError("The compatible endpoint returned no completion choice.")
+        choice = choices[0]
+        message = _obj_get(choice, "message", {})
+        content = _obj_get(message, "content", "") or ""
+        reasoning_content = _obj_get(message, "reasoning_content", "") or ""
+        raw_calls = _obj_get(message, "tool_calls", []) or []
+        tool_calls, provider_calls, valid_calls = self._parse_chat_completion_tool_calls(raw_calls)
+        provider_reason = str(_obj_get(choice, "finish_reason", "") or "")
+        finish_reason = self._chat_completion_finish_reason(
+            provider_reason,
+            has_tool_calls=bool(tool_calls) and valid_calls,
+        )
+        if raw_calls and (not valid_calls or provider_reason != "tool_calls"):
+            tool_calls = []
+            provider_calls = []
+            finish_reason = "incomplete" if provider_reason == "tool_calls" else finish_reason
+        provider_messages = (
+            [{"role": "assistant", "content": content or None, "tool_calls": provider_calls}]
+            if tool_calls else []
+        )
+        usage = provider_responses.usage_from_openai(_obj_get(response, "usage", None))
+        usage.source = "provider" if usage.total_tokens else "estimated"
+        return LLMResponse(
+            content=str(content),
+            reasoning_content=str(reasoning_content),
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            provider_messages=provider_messages,
+            usage=usage,
+            provider_finish_reason=provider_reason,
+        )
+
+    async def _openai_chat_completions_stream(
+        self,
+        kwargs: dict,
+        stream_callback: Callable[[str], Awaitable[None]] | None,
+        reasoning_callback: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        stream = await self._openai_client.chat.completions.create(**{**kwargs, "stream": True})
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        provider_reason = ""
+        usage = UsageStats()
+
+        async for chunk in stream:
+            chunk_usage = _obj_get(chunk, "usage", None)
+            if chunk_usage is not None:
+                usage = provider_responses.usage_from_openai(chunk_usage)
+            choices = _obj_get(chunk, "choices", []) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            provider_reason = str(_obj_get(choice, "finish_reason", "") or provider_reason)
+            delta = _obj_get(choice, "delta", {})
+            reasoning_delta = _obj_get(delta, "reasoning_content", None)
+            if isinstance(reasoning_delta, str) and reasoning_delta:
+                reasoning_parts.append(reasoning_delta)
+                if reasoning_callback is not None:
+                    await reasoning_callback(reasoning_delta)
+            text_delta = _obj_get(delta, "content", None)
+            if isinstance(text_delta, str) and text_delta:
+                content_parts.append(text_delta)
+                if stream_callback is not None:
+                    await stream_callback(text_delta)
+            for raw in (_obj_get(delta, "tool_calls", []) or []):
+                index = _obj_get(raw, "index", None)
+                if not isinstance(index, int) or index < 0:
+                    continue
+                current = calls.setdefault(index, {
+                    "id": "", "type": "function", "function": {"name": "", "arguments": ""},
+                })
+                call_id = _obj_get(raw, "id", None)
+                if call_id:
+                    current["id"] = str(call_id)
+                function_delta = _obj_get(raw, "function", {}) or {}
+                name_delta = _obj_get(function_delta, "name", None)
+                arguments_delta = _obj_get(function_delta, "arguments", None)
+                if name_delta:
+                    current["function"]["name"] += str(name_delta)
+                if arguments_delta:
+                    current["function"]["arguments"] += str(arguments_delta)
+
+        content = "".join(content_parts)
+        reasoning_content = "".join(reasoning_parts)
+        raw_calls = [calls[index] for index in sorted(calls)]
+        tool_calls, provider_calls, valid_calls = self._parse_chat_completion_tool_calls(raw_calls)
+        if not provider_reason:
+            raise ResponseInterruptedError(
+                "The compatible endpoint stream ended without a completion reason; no tool calls were accepted."
+            )
+        finish_reason = self._chat_completion_finish_reason(
+            provider_reason,
+            has_tool_calls=bool(tool_calls) and valid_calls,
+        )
+        if raw_calls and (not valid_calls or provider_reason != "tool_calls"):
+            tool_calls = []
+            provider_calls = []
+            finish_reason = "incomplete" if provider_reason == "tool_calls" else finish_reason
+        provider_messages = (
+            [{"role": "assistant", "content": content or None, "tool_calls": provider_calls}]
+            if tool_calls else []
+        )
+        usage.source = "provider" if usage.total_tokens else "estimated"
+        return LLMResponse(
+            content=content,
+            reasoning_content=reasoning_content,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            provider_messages=provider_messages,
+            usage=usage,
+            provider_finish_reason=provider_reason,
+        )
+
 
     # ------------------------------------------------------------------
     # OpenAI implementation

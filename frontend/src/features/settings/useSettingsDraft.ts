@@ -9,12 +9,13 @@ import { FOOTER_COPY } from './settingsCopy'
 
 export type SaveOutcome = 'saved' | 'keys_failed' | 'failed'
 
-const EMPTY_SECRETS: ConnectionSecretValues = { openai: '', google: '', tavily: '', telegramBot: '' }
+const EMPTY_SECRETS: ConnectionSecretValues = { openai: '', google: '', compatible: '', tavily: '', telegramBot: '' }
 
 /** Outside Electron, edited keys travel with the settings request instead of the OS store. */
 const BROWSER_SECRET_FIELDS = {
   openai: 'openai_api_key',
   google: 'google_api_key',
+  compatible: 'compatible_api_key',
   tavily: 'tavily_api_key',
   telegramBot: 'telegram_bot_token',
 } as const satisfies Record<ConnectionSecretId, string>
@@ -49,6 +50,7 @@ function withCredentialStatus(
       ...keys,
       has_openai_key: (merge && keys.has_openai_key) || status.openai,
       has_google_key: (merge && keys.has_google_key) || status.google,
+      has_compatible_key: (merge && keys.has_compatible_key) || status.compatible,
       has_tavily_key: (merge && keys.has_tavily_key) || status.tavily,
       has_telegram_bot_token: (merge && Boolean(keys.has_telegram_bot_token)) || status.telegramBot,
     },

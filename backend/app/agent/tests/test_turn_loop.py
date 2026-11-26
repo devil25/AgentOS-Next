@@ -4309,3 +4309,62 @@ def test_memory_learning_includes_steering_sent_mid_turn():
         loop.shutdown()
 
     assert learned == ["Install the deps\n\nFrom now on use pnpm here"]
+
+
+
+def test_turn_loop_accepts_per_run_reasoning_client_and_keeps_tool_execution_path():
+    invoked = []
+
+    class DefaultClient:
+        async def chat_with_tools(self, messages, tools, **kwargs):
+            raise AssertionError("The default provider must not be called for this run.")
+
+    class SelectedWebChatClient:
+        provider = "web_chat"
+        model_name = "ChatGPT Web Chat"
+
+        async def chat_with_tools(self, messages, tools, **kwargs):
+            if not invoked:
+                return LLMResponse(
+                    content="",
+                    tool_calls=[ToolCallRequest(call_id="web-action-1", tool_name="inspect", arguments={})],
+                    finish_reason="tool_calls",
+                )
+            return final_answer_response("Web chat task completed.")
+
+        @staticmethod
+        def build_provider_tool_result_message(result):
+            return {
+                "role": "user", "tool_result": True,
+                "content": f"AgentOS tool result for {result.name}: {result.output}",
+            }
+
+    def inspect():
+        invoked.append("ran")
+        return '{"status":"ok","verified":true}'
+
+    loop = TurnLoop(
+        llm_client=DefaultClient(),
+        registry=ToolRegistry([{
+            "name": "inspect", "callable": inspect,
+            "parameters": {"type": "object", "properties": {}},
+            "metadata": {"risk_level": "low"},
+        }]),
+        memory=PersistingFakeMemory(),
+        observability=FakeObservability(),
+    )
+
+    async def collect():
+        return [event async for event in loop.run(
+            "Inspect the current state", "web-chat-injected-run",
+            system_prompt="",
+            reasoning_client=SelectedWebChatClient(),
+        )]
+
+    try:
+        events = asyncio.run(collect())
+    finally:
+        loop.shutdown()
+
+    assert invoked == ["ran"]
+    assert events[-1]["data"]["summary"] == "Web chat task completed."

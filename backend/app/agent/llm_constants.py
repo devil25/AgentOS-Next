@@ -26,6 +26,8 @@ def normalize_chat_model(provider: str, model_name: str, custom_models: tuple[st
         return model_name
     if provider == "codex":
         return model_name or DEFAULT_OPENAI_CHAT_MODEL
+    if provider == "openai_compatible":
+        return model_name or "your-model-id"
     if provider == "openai":
         # The API retired gpt-6-sol; a ChatGPT account still lists it.
         model = "gpt-6.1-sol" if model_name == "gpt-6-sol" else model_name

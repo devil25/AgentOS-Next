@@ -78,6 +78,7 @@ function buildSettings(overrides: Record<string, unknown> = {}) {
     llm: {
       provider: 'openai',
       model_name: 'gpt-5.6-luna',
+      compatible_base_url: '',
       reasoning_effort: 'medium',
       max_iterations_per_turn: 40,
       max_turn_seconds: 1800,
@@ -284,6 +285,7 @@ function buildSettings(overrides: Record<string, unknown> = {}) {
     api_keys: {
       has_openai_key: true,
       has_google_key: true,
+      has_compatible_key: false,
       has_tavily_key: true,
       has_telegram_bot_token: true,
       has_telegram_allowlist: false,
@@ -306,6 +308,7 @@ describe('SettingsModal', () => {
           label: 'Google',
           models: ['gemini-pro-latest', 'gemini-flash-latest', 'gemini-flash-lite-latest'],
         },
+        { id: 'openai_compatible', label: 'OpenAI-compatible API', models: [] },
       ],
     } as any)
     mocks.fetchSandboxStatus.mockResolvedValue({
@@ -335,6 +338,29 @@ describe('SettingsModal', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+  })
+
+  it('applies a DeepSeek setup preset and saves the model connection', async () => {
+    render(<SettingsModal onClose={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Connections/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Compatible provider preset' }))
+    fireEvent.click(screen.getByRole('option', { name: 'DeepSeek API · V4.1 Flash' }))
+
+    expect(screen.getByLabelText('OpenAI-compatible API base URL')).toHaveValue('https://api.deepseek.com')
+    fireEvent.click(screen.getByRole('button', { name: /Save/i }))
+
+    await waitFor(() => {
+      expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+        llm: expect.objectContaining({
+          provider: 'openai_compatible',
+          model_name: 'deepseek-flash',
+          compatible_base_url: 'https://api.deepseek.com',
+          custom_models: expect.objectContaining({
+            openai_compatible: expect.arrayContaining(['deepseek-flash']),
+          }),
+        }),
+      }))
+    })
   })
 
   it('keeps model selection and image help out of Settings', async () => {
@@ -585,6 +611,7 @@ describe('SettingsModal', () => {
       api_keys: {
         has_openai_key: false,
         has_google_key: false,
+        has_compatible_key: false,
         has_tavily_key: false,
         has_telegram_bot_token: false,
       },
@@ -600,6 +627,7 @@ describe('SettingsModal', () => {
       api_keys: {
         has_openai_key: false,
         has_google_key: false,
+        has_compatible_key: false,
         has_tavily_key: false,
         has_telegram_bot_token: false,
       },
@@ -609,6 +637,7 @@ describe('SettingsModal', () => {
       applyStoredCredentials: vi.fn().mockResolvedValue({
         openai: true,
         google: true,
+        compatible: false,
         tavily: true,
         telegramBot: true,
       }),
@@ -718,6 +747,7 @@ describe('SettingsModal', () => {
       applyStoredCredentials: vi.fn().mockResolvedValue({
         openai: false,
         google: false,
+        compatible: false,
         tavily: false,
         telegramBot: false,
       }),
@@ -752,6 +782,7 @@ describe('SettingsModal', () => {
       api_keys: {
         has_openai_key: true,
         has_google_key: true,
+        has_compatible_key: false,
         has_tavily_key: true,
         has_telegram_bot_token: true,
       },
@@ -762,6 +793,7 @@ describe('SettingsModal', () => {
       applyStoredCredentials: vi.fn().mockResolvedValue({
         openai: true,
         google: true,
+        compatible: false,
         tavily: true,
         telegramBot: true,
       }),
@@ -788,6 +820,7 @@ describe('SettingsModal', () => {
     const deleteCredential = vi.fn().mockResolvedValue({
       openai: false,
       google: false,
+      compatible: false,
       tavily: false,
       telegramBot: false,
     })
@@ -796,6 +829,7 @@ describe('SettingsModal', () => {
       applyStoredCredentials: vi.fn().mockResolvedValue({
         openai: false,
         google: false,
+        compatible: false,
         tavily: false,
         telegramBot: true,
       }),

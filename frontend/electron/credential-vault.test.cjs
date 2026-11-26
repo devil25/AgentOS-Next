@@ -41,6 +41,7 @@ test('migrates plaintext credentials and never returns them in status', () => {
     openai: true,
     google: false,
     tavily: false,
+    compatible: false,
     telegramBot: true,
   })
   assert.ok(deletedLegacy.includes('openai_api_key'))
@@ -76,4 +77,14 @@ test('preload exposes no generic credential read API', () => {
   assert.match(preload, /credentialStatus/)
   assert.match(preload, /setCredential/)
   assert.match(preload, /deleteCredential/)
+})
+
+test('stores and clears compatible endpoint credentials through the encrypted vault', () => {
+  const { values, vault } = harness()
+  vault.setCredential('compatible', 'endpoint-secret')
+  assert.match(values.get('compatible_api_key'), new RegExp(`^${ENCRYPTED_PREFIX}`))
+  assert.deepEqual(vault.backendPayload(), { compatible_api_key: 'endpoint-secret' })
+  vault.deleteCredential('compatible')
+  assert.equal(vault.status().compatible, false)
+  assert.deepEqual(vault.backendPayload(), {})
 })
