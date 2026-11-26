@@ -152,8 +152,8 @@ function Start-NpmScriptHidden {
     if (-not (Test-Path -LiteralPath $electronExe)) {
       throw "Electron executable was not found: $electronExe. Run setup.bat to restore frontend dependencies."
     }
-    $command = '"{0}" . > "{1}" 2>&1' -f $electronExe, $LogPath
-    return Start-Process -FilePath $env:ComSpec -ArgumentList @('/d', '/s', '/c', $command) -WorkingDirectory $frontendDir -WindowStyle Hidden -PassThru
+    $stderrLogPath = "$LogPath.stderr"
+    return Start-Process -FilePath $electronExe -ArgumentList @('.') -WorkingDirectory $frontendDir -RedirectStandardOutput $LogPath -RedirectStandardError $stderrLogPath -WindowStyle Hidden -PassThru
   }
 
   $extraArgs = if ($ScriptName -eq 'dev:vite') { ' -- --port {0} --strictPort' -f $vitePort } else { '' }
