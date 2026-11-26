@@ -80,6 +80,7 @@ def test_web_chat_action_ids_are_reserved_once_per_durable_run(tmp_path):
         "run-1", "step-1", "fs.write", {"path": "x"}, db=db,
     ) is False
     # The same provider-generated ID is independent in another Run.
+    db.create_conversation("conversation-2", "Second web chat task")
     Journal(db).create_run(
         run_id="run-2",
         conversation_id="conversation-2",
