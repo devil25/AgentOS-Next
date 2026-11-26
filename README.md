@@ -39,6 +39,7 @@
 | **Work with files and code** | Read and edit project files, run shell commands, and give each conversation its own workspace and `AGENTS.md` instructions. Review Git-tracked changes and Undo from the [Changes page](docs/file-changes.md). |
 | **Use your browser and desktop** | Automate Chrome through the AgentOS-Next extension and interact with Windows apps. [Browser automation](docs/browser-automation.md) · [Computer use](docs/computer-use.md) |
 | **Choose your model** | Connect an OpenAI API key, sign in with your ChatGPT account, use Google Gemini, or connect compatible cloud and local endpoints such as DeepSeek, Z.ai, OpenRouter, Ollama, and LM Studio. |
+| **Use a signed-in AI website as the reasoning engine** | Development preview: use the visible ChatGPT, Gemini, DeepSeek, or Z.ai conversation in Chrome while AgentOS-Next executes approved tools locally. See [web-chat provider status and setup](docs/web-chat-provider-architecture.md). |
 | **Keep context across tasks** | Save global preferences and workspace memory, and steer or stop an active task. [Memory guide](docs/memory.md) |
 | **Connect and automate** | Add MCP tools, schedule tasks, and optionally send tasks through Telegram. [MCP](docs/mcp.md) · [Scheduling](docs/scheduling.md) · [Telegram](docs/telegram.md) |
 | **Control how actions run** | Choose Default, Full Access, Auto Review, or Custom permissions, with separate sandbox settings. [Permissions](docs/permissions.md) · [Sandboxing](docs/sandboxing.md) |
@@ -103,6 +104,18 @@ You can steer or stop AgentOS-Next while it works. For browser tasks, set up the
 | **MCP servers** | Additional local or remote tools. | Settings > Tools > MCP; supports stdio and Streamable HTTP. |
 
 Browser profiles and allowed domains are configured under **Settings > Browser**. See the [documentation](#documentation) for memory, scheduling, Telegram, and other workflows.
+
+### Development preview: use a signed-in website as the reasoning engine
+
+The chat composer includes a **Reasoning engine** selector for ChatGPT website, Gemini website, DeepSeek website, and Z.ai website. This path uses the conversation visible in your own Chrome session; it does not require a provider API key. It is an experimental integration and is not yet a production support guarantee for every provider layout or account plan.
+
+1. Open Chrome, sign in to the provider website yourself, and leave the target conversation tab open.
+2. Confirm the AgentOS-Next Chrome extension is connected under **Settings > Browser**.
+3. In a normal AgentOS-Next chat using your configured model, ask the browser agent to list open pages and their page IDs. Identify the signed-in provider tab from that result.
+4. In the composer, choose the matching website under **Reasoning engine**, enter that Chrome DevTools page ID, and send your task.
+5. Keep that tab on the same conversation while the task runs. If the tab navigates, Chrome restarts, the provider asks for sign-in, or a challenge/rate limit appears, the run stops rather than switching to another page.
+
+AgentOS-Next uses its existing tool permissions and approval flow for local actions. It does not read or store your provider password, cookies, or session tokens. Provider availability, usage limits, and free/paid plan restrictions remain controlled by the provider. Live end-to-end validation is still required before treating each website adapter as production-ready.
 
 ## Workspaces, Memory, and Local Data
 
