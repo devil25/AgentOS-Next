@@ -5,6 +5,7 @@ import pytest
 from app.agent.database import Database
 from app.agent.durable.journal import Journal
 from app.agent.web_chat.session_store import (
+    claim_web_chat_action_id,
     load_web_chat_run_context,
     restore_web_chat_reasoning_client,
     save_web_chat_run_context,
@@ -64,4 +65,36 @@ def test_web_chat_run_context_rejects_cross_provider_conversation_url(tmp_path):
             "run-1", "chatgpt", 17,
             conversation_url="https://chat.z.ai/c/other",
             db=db,
+        )
+
+def test_web_chat_action_ids_are_reserved_once_per_durable_run(tmp_path):
+    db = _database(tmp_path)
+    assert claim_web_chat_action_id(
+        "run-1", "step-1", "terminal.execute", {"command": "Get-Date"}, db=db,
+    ) is True
+    assert claim_web_chat_action_id(
+        "run-1", "step-1", "terminal.execute", {"command": "Get-Date"}, db=db,
+    ) is False
+    # An ID cannot be reused for a different action payload either.
+    assert claim_web_chat_action_id(
+        "run-1", "step-1", "fs.write", {"path": "x"}, db=db,
+    ) is False
+    # The same provider-generated ID is independent in another Run.
+    Journal(db).create_run(
+        run_id="run-2",
+        conversation_id="conversation-2",
+        execution_source="desktop",
+        owner_instance_id="owner-1",
+        turn_id="turn-2",
+    )
+    assert claim_web_chat_action_id(
+        "run-2", "step-1", "terminal.execute", {"command": "Get-Date"}, db=db,
+    ) is True
+
+
+def test_web_chat_action_id_claim_rejects_unknown_run(tmp_path):
+    db = _database(tmp_path)
+    with pytest.raises(ValueError, match="unknown Run"):
+        claim_web_chat_action_id(
+            "missing-run", "step-1", "terminal.execute", {"command": "Get-Date"}, db=db,
         )
