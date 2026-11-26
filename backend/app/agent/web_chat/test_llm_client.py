@@ -285,3 +285,29 @@ def test_chat_request_requires_web_chat_provider_and_tab_as_a_pair():
     )
     assert request.web_chat_provider == "zai"
     assert request.web_chat_page_id == 12
+
+def test_web_chat_client_persists_target_before_first_model_request(monkeypatch):
+    from app.agent.web_chat import session_store
+
+    saved = []
+    monkeypatch.setattr(
+        session_store, "save_web_chat_run_context",
+        lambda *args, **kwargs: saved.append((args, kwargs)),
+    )
+    client = WebChatLLMClient(
+        FakeAdapter([]), provider="gemini", tab_id=31,
+        run_id="durable-run-31",
+    )
+    client.bind_durable_run(SimpleNamespace(run_id="durable-run-31"))
+    assert saved == [
+        (("durable-run-31", "gemini", 31), {"conversation_url": ""}),
+    ]
+
+
+def test_web_chat_client_rejects_mismatched_durable_run():
+    client = WebChatLLMClient(
+        FakeAdapter([]), provider="chatgpt", tab_id=4,
+        run_id="run-expected",
+    )
+    with pytest.raises(RuntimeError, match="does not match"):
+        client.bind_durable_run(SimpleNamespace(run_id="different-run"))
