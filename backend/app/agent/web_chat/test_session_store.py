@@ -87,6 +87,7 @@ def test_web_chat_action_ids_are_reserved_once_per_durable_run(tmp_path):
         execution_source="desktop",
         owner_instance_id="owner-1",
         turn_id="turn-2",
+        workspace_dir=str(tmp_path / "second-workspace"),
     )
     assert claim_web_chat_action_id(
         "run-2", "step-1", "terminal.execute", {"command": "Get-Date"}, db=db,
