@@ -10,13 +10,14 @@ This branch introduces a native Electron `WebContentsView` inside AgentOS-Next.
 - The remote page has no Node integration, uses context isolation and sandboxing, and receives no site permissions by default.
 - Navigation is HTTPS-only. The renderer cannot supply arbitrary JavaScript.
 - The initial read operation is a fixed, read-only DOM extraction that returns the page title, URL, visible text, and headings. It does not read cookies, local storage, session storage, passwords, or authorization headers.
-- The backend exposes this through the registered `embedded_browser_read` observation tool. The Electron-to-backend bridge is loopback-only, bearer-authenticated, and accepts only the fixed inspection route; the normal agent tool runner invokes the read tool.
+- The backend exposes this through the registered `embedded_browser_read` observation tool. The Electron-to-backend bridge is loopback-only and bearer-authenticated.
+- The AgentOS tool runner can also request a bounded interactive-element snapshot, click a snapshot index, fill a visible non-password text field, send a small allow-listed keyboard event, or navigate to an HTTPS URL. The Electron side implements fixed actions; it never accepts arbitrary JavaScript from the backend.
 
 ## Current scope and next integration boundary
 
-This slice establishes the in-app browser and routes read-only page inspection to the agent through its normal registered tool path. It does **not yet** provide browser interaction tools for the embedded view or make the embedded conversation itself the active web-chat reasoning provider. The existing Chrome-extension path remains separate and unchanged.
+This slice establishes the in-app browser and routes page reading plus bounded interactions through registered AgentOS tools. It does **not yet** make the embedded conversation itself the active web-chat reasoning provider; that requires a provider-specific conversation adapter and end-to-end testing. The existing Chrome-extension path remains separate and unchanged.
 
-The next slice must add controlled interaction tools (snapshot, fill, key, click, navigation) and route the existing web-chat adapter through the embedded view. Every inspection and interaction must continue through the tool runner's policy, approval, journaling, and durable-run ownership checks. Do not add a second ungoverned execution path.
+The next slice must route the existing web-chat adapter through the embedded view, with provider-specific message/composer extraction and completion detection. Every inspection and interaction must continue through the tool runner's policy, approval, journaling, and durable-run ownership checks. Do not add a second ungoverned execution path.
 
 ## Validation requirements
 
