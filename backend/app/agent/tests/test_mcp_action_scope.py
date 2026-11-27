@@ -28,6 +28,9 @@ def test_unknown_mcp_review_is_exact_and_server_replacement_invalidates_it(setti
     tool = SimpleNamespace(name="get_data", description="A harmless read", inputSchema={"type": "object"},
                            annotations={"readOnlyHint": True})
     entry = build_tool_entries(cfg, manager, [tool])[0]
+    assert entry["metadata"].get("durable_builtin") is not True
+    from app.agent.durable.operation_policy import classify_tool
+    assert classify_tool(entry["name"], trusted_builtin=False).effect_class == "opaque_effect"
     pending = json.loads(entry["callable"](recipient="first"))
     assert pending["status"] == "pending_approval"
     assert pending["human_only"] is True
