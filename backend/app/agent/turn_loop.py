@@ -139,6 +139,44 @@ def _resolve_explicit_list_pages_call(user_message: str, tools: list[dict]) -> d
     }
 
 
+def _resolve_explicit_google_open_call(user_message: str, tools: list[dict]) -> dict | None:
+    """Resolve a plain request to open Google without entering web-chat transport.
+
+    Opening a website is a browser-navigation task, not a request to inspect or
+    message the selected reasoning provider. Use new_page so the user's current
+    tab is preserved and no provider-specific inspection is attempted.
+    """
+    text = " ".join(str(user_message or "").casefold().split())
+    patterns = (
+        r"(?:افتح|فتح) .*?(?:جوجل|google)",
+        r"(?:open|go to) .*?google",
+    )
+    if not any(re.search(pattern, text) for pattern in patterns):
+        return None
+
+    matches: list[str] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("name") or "")
+        if not (name == "new_page" or name.endswith("__new_page") or name.endswith("_new_page")):
+            continue
+        parameters = tool.get("parameters")
+        parameters = parameters if isinstance(parameters, dict) else {}
+        properties = parameters.get("properties")
+        properties = properties if isinstance(properties, dict) else {}
+        required = parameters.get("required") or []
+        if "url" in properties and isinstance(required, list) and "url" in required:
+            matches.append(name)
+    if len(matches) != 1:
+        return None
+    return {
+        "call_id": "explicit-open-google-" + uuid.uuid4().hex,
+        "name": matches[0],
+        "arguments": {"url": "https://www.google.com/", "includeSnapshot": False},
+    }
+
+
 def _single_tool_result_text(output: str) -> str:
     """Prefer the text content of an MCP result over its serialized envelope."""
     raw = str(output or "")
@@ -658,6 +696,27 @@ class TurnLoop:
                         final_text = "The requested list_pages tool returned no result. No other tool was invoked."
                         terminal_error = True
                         incomplete_reason_code = "explicit_tool_scope_no_result"
+                    break
+                direct_call = _resolve_explicit_google_open_call(message, visible_tools)
+                if direct_call is not None:
+                    batch_outcome = await tool_runner.execute([direct_call])
+                    if batch_outcome.pause is not None:
+                        final_text = batch_outcome.pause.summary or "The requested Google page could not be opened."
+                        incomplete_reason_code = batch_outcome.pause.reason_code or "explicit_browser_navigation_blocked"
+                        terminal_error = batch_outcome.pause.status == "error"
+                        stop_requested = True
+                    elif tool_runner.history:
+                        direct_result = tool_runner.history[-1]
+                        final_text = _single_tool_result_text(str(direct_result.get("output") or ""))
+                        if direct_result.get("status") == "complete":
+                            completed_normally = True
+                        else:
+                            terminal_error = True
+                            incomplete_reason_code = "explicit_browser_navigation_failed"
+                    else:
+                        final_text = "The requested Google page returned no result."
+                        terminal_error = True
+                        incomplete_reason_code = "explicit_browser_navigation_no_result"
                     break
                 try:
                     model_result = await _model_request_or_pause(model_runner.request(transcript.snapshot(
