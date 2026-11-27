@@ -71,6 +71,15 @@ test('embedded browser exposes only fixed interaction actions through its authen
   assert.doesNotMatch(main, /payload\.script|payload\.javascript|executeJavaScript\(payload/)
 })
 
+test('embedded page scripts run in an isolated world and preserve actionable execution errors', () => {
+  assert.match(main, /const EMBEDDED_BROWSER_ISOLATED_WORLD_ID = 1337/)
+  assert.match(main, /executeJavaScriptInIsolatedWorld\(/)
+  assert.match(main, /__agentosScriptOk/)
+  assert.match(main, /provider page execution context changed/)
+  assert.match(main, /browser_execution_context_changed/)
+  assert.doesNotMatch(main, /webContents\.executeJavaScript\(/)
+})
+
 test('embedded conversation endpoint returns provider-aware structured messages', () => {
   assert.match(main, /action === 'conversation'/)
   assert.match(main, /data-message-author-role/)
@@ -78,7 +87,7 @@ test('embedded conversation endpoint returns provider-aware structured messages'
   assert.match(main, /loginRequired/)
   assert.match(main, /generating/)
   assert.match(main, /request\.url === '\/v1\/conversation'/)
-  assert.match(main, /executeJavaScript\(script, true\)/)
+  assert.match(main, /executeEmbeddedBrowserScript\(embeddedBrowserView\.webContents, script\)/)
 })
 
 test('embedded ChatGPT conversation detection has safe fallbacks and precise generation state', () => {
