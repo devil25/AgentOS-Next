@@ -20,7 +20,7 @@ def save_web_chat_run_context(
 ) -> None:
     if provider not in SUPPORTED_WEB_CHAT_PROVIDERS:
         raise ValueError("Unsupported web-chat provider.")
-    if isinstance(page_id, bool) or not isinstance(page_id, int) or page_id < 0:
+    if isinstance(page_id, bool) or not isinstance(page_id, int) or page_id < 1:
         raise ValueError("A valid Chrome DevTools page ID is required.")
     if not isinstance(conversation_url, str) or len(conversation_url) > 4096:
         raise ValueError("The provider conversation URL is invalid.")
@@ -95,7 +95,7 @@ def load_web_chat_run_context(run_id: str, *, db: Database | None = None) -> dic
         return None
     provider = str(row["provider"] or "")
     page_id = int(row["page_id"])
-    if provider not in SUPPORTED_WEB_CHAT_PROVIDERS or page_id < 0:
+    if provider not in SUPPORTED_WEB_CHAT_PROVIDERS or page_id < 1:
         return None
     return {"provider": provider, "page_id": page_id, "conversation_url": str(row["conversation_url"] or "")}
 
