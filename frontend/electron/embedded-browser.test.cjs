@@ -112,7 +112,7 @@ test('ChatGPT response capture uses the complete legacy-style accessibility tree
   assert.match(main, /snapshot\.messages = mergedMessages/)
   assert.match(main, /const messageKey/)
   assert.match(main, /hasAssistantMessage/)
-  assert.match(main, /dom\\+accessibility_tree/)
+  assert.ok(main.includes('dom+accessibility_tree'))
 
 })
 
