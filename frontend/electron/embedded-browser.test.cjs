@@ -45,3 +45,13 @@ test('embedded page inspection is fixed read-only extraction, not arbitrary scri
 test('embedded browser denies site permission prompts by default', () => {
   assert.match(main, /setPermissionRequestHandler\(\(_contents, _permission, callback\) => callback\(false\)\)/)
 })
+
+test('backend page-read bridge is loopback-only and bearer-authenticated', () => {
+  assert.match(main, /embeddedBrowserBridgeServer = http\.createServer/)
+  assert.match(main, /embeddedBrowserBridgeServer\.listen\(0, '127\.0\.0\.1'/)
+  assert.match(main, /request\.socket\.remoteAddress/)
+  assert.match(main, /crypto'\)\.timingSafeEqual/)
+  assert.match(main, /request\.url !== '\/v1\/inspect'/)
+  assert.match(main, /AGENTOS_EMBEDDED_BROWSER_SECRET: EMBEDDED_BROWSER_BRIDGE_SECRET/)
+  assert.match(main, /await startEmbeddedBrowserBridge\(\)/)
+})
