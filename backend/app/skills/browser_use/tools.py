@@ -564,12 +564,22 @@ async def _embedded_browser_request(path: str, payload: dict[str, Any] | None = 
             },
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=12) as response:
-            value = json.loads(response.read(512 * 1024).decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=12) as response:
+                raw = response.read(512 * 1024)
+        except urllib.error.HTTPError as exc:
+            raw = exc.read(16 * 1024)
+            try:
+                detail = json.loads(raw.decode("utf-8", errors="replace"))
+            except (ValueError, TypeError):
+                detail = {}
+            message = str(detail.get("error") or exc.reason or "Embedded browser request failed")[:500]
+            raise RuntimeError(f"Embedded browser bridge HTTP {exc.code}: {message}") from exc
+        value = json.loads(raw.decode("utf-8"))
         if not isinstance(value, dict):
             raise ValueError("Invalid embedded browser response")
         if value.get("error"):
-            raise RuntimeError(str(value["error"])[:300])
+            raise RuntimeError(str(value["error"])[:500])
         return value
 
     return await asyncio.to_thread(_request)
