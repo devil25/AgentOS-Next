@@ -75,7 +75,7 @@ async def test_embedded_port_submits_only_to_one_editable_composer():
 
     assert calls == [
         ("embedded_browser_snapshot", {}),
-        ("embedded_browser_type", {"index": 0, "text": "Perform a harmless test"}),
+        ("embedded_browser_type", {"index": 0, "text": "Perform a harmless test", "append": False}),
         ("embedded_browser_press_key", {"key": "Enter"}),
     ]
 
@@ -98,3 +98,30 @@ async def test_embedded_port_refuses_ambiguous_composers_without_typing():
     with pytest.raises(WebChatAdapterError, match="exactly one"):
         await port.submit(1, "Do not send")
     assert [name for name, _ in calls] == ["embedded_browser_snapshot"]
+
+
+@pytest.mark.anyio
+async def test_embedded_port_chunks_long_prompts_without_losing_order():
+    calls = []
+
+    async def execute(name, arguments):
+        calls.append((name, arguments))
+        if name == "embedded_browser_snapshot":
+            return _tool_result({
+                "ok": True,
+                "elements": [
+                    {"index": 0, "editable": True, "disabled": False,
+                     "type": "textarea", "placeholder": "Message ChatGPT"},
+                ],
+            })
+        return _tool_result({"ok": True, "action": name})
+
+    prompt = "أ" * 7501
+    port = EmbeddedWebChatBrowserPort("chatgpt", execute)
+    await port.submit(1, prompt)
+
+    typed = [args for name, args in calls if name == "embedded_browser_type"]
+    assert [len(item["text"]) for item in typed] == [3000, 3000, 1501]
+    assert "".join(item["text"] for item in typed) == prompt
+    assert [item["append"] for item in typed] == [False, True, True]
+    assert calls[-1] == ("embedded_browser_press_key", {"key": "Enter"})
