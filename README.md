@@ -111,8 +111,8 @@ The chat composer includes a **Reasoning engine** selector for ChatGPT website, 
 
 1. Open Chrome, sign in to the provider website yourself, and leave the target conversation tab open.
 2. Confirm the AgentOS-Next Chrome extension is connected under **Settings > Browser**.
-3. In a normal AgentOS-Next chat using your configured model, ask the browser agent to list open pages and their page IDs. Identify the signed-in provider tab from that result.
-4. In the composer, choose the matching website under **Reasoning engine**, enter that Chrome DevTools page ID, and send your task.
+3. In the composer, choose the website under **Reasoning engine** and send your task. AgentOS-Next automatically lists open Chrome pages and selects the only tab matching that provider's exact HTTPS origin.
+4. If more than one tab for that provider is open, AgentOS-Next stops and lists the matching page IDs/titles rather than guessing. Close the unwanted tabs and retry, or enter a page ID in the optional override field.
 5. Keep that tab on the same conversation while the task runs. If the tab navigates, Chrome restarts, the provider asks for sign-in, or a challenge/rate limit appears, the run stops rather than switching to another page.
 
 AgentOS-Next uses its existing tool permissions and approval flow for local actions. It does not read or store your provider password, cookies, or session tokens. Provider availability, usage limits, and free/paid plan restrictions remain controlled by the provider. Live end-to-end validation is still required before treating each website adapter as production-ready.
