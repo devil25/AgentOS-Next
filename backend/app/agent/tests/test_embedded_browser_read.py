@@ -157,3 +157,45 @@ def test_embedded_browser_interactions_are_registered_with_mutation_metadata():
         assert by_name[name]["metadata"]["mutates_state"] is True
         assert by_name[name]["metadata"]["parallel_safe"] is False
         assert by_name[name]["metadata"]["resource_locks"] == ["embedded_browser"]
+
+
+@pytest.mark.anyio
+async def test_embedded_browser_conversation_returns_bounded_structured_messages(monkeypatch):
+    monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_PORT", "43210")
+    monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_SECRET", "test-secret")
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return _Response({
+            "ok": True,
+            "provider": "chatgpt",
+            "title": "ChatGPT",
+            "url": "https://chatgpt.com/c/abc",
+            "messages": [
+                {"message_id": "u1", "role": "user", "text": "Hello"},
+                {"message_id": "a1", "role": "assistant", "text": "Hi"},
+                {"message_id": "ignored", "role": "system", "text": "not exposed"},
+            ],
+            "composerReady": True,
+            "generating": False,
+            "loginRequired": False,
+        })
+
+    monkeypatch.setattr(tools.urllib.request, "urlopen", fake_urlopen)
+    result = json.loads(await tools.embedded_browser_conversation())
+
+    assert captured["url"] == "http://127.0.0.1:43210/v1/conversation"
+    assert result["ok"] is True
+    assert [item["role"] for item in result["messages"]] == ["user", "assistant"]
+    assert result["composerReady"] is True
+
+
+def test_embedded_conversation_tool_is_read_only_and_serialized():
+    registry = []
+    register_browser_tools(registry, settings=object())
+    tool = next(item for item in registry if item["name"] == "embedded_browser_conversation")
+    assert tool["metadata"]["observation"] is True
+    assert tool["metadata"]["mutates_state"] is False
+    assert tool["metadata"]["parallel_safe"] is False
+    assert tool["metadata"]["resource_locks"] == ["embedded_browser"]
