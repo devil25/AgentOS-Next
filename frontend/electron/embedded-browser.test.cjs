@@ -89,6 +89,17 @@ test('embedded ChatGPT conversation detection has safe fallbacks and precise gen
   assert.doesNotMatch(main, /document\.querySelector\('\[aria-busy="true",\[data-testid\*="stop"/)
 })
 
+test('ChatGPT response capture falls back to Chromium accessibility tree when DOM markers disappear', () => {
+  assert.match(main, /Accessibility\.getFullAXTree/)
+  assert.match(main, /DOM\.resolveNode/)
+  assert.match(main, /Runtime\.callFunctionOn/)
+  assert.match(main, /captureSource = 'accessibility_tree'/)
+  assert.match(main, /inspectEmbeddedAccessibilityMessages\(\)/)
+  assert.match(main, /data-message-author-role/)
+  assert.match(main, /chatgpt said/)
+  assert.match(main, /A stale AX backend node is skipped/)
+})
+
 test('ChatGPT Enter submits through the enabled Send button when available', () => {
   assert.match(main, /button\[data-testid="send-button"\]/)
   assert.match(main, /button\[aria-label\*="Send" i\]/)
