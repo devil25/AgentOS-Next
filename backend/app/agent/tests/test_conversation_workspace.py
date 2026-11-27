@@ -339,7 +339,7 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
         turn_id="trash-turn",
         workspace_dir="C:/work",
     )
-    operation = journal.prepare_operation(
+    journal.prepare_operation(
         created["run_id"],
         operation_id="trash-uncertain-operation",
         owner_instance_id="trash-owner",
@@ -349,7 +349,7 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
         tool_name="shell_command",
     )
     for status in ("authorized", "executing", "uncertain"):
-        operation = journal.transition_operation(
+        journal.transition_operation(
             created["run_id"],
             "trash-uncertain-operation",
             to_status=status,
@@ -365,6 +365,9 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
     assert db.get_conversation("trash-chat")["deleted_at"]
     assert db.list_conversations() == []
     assert [row["id"] for row in db.list_deleted_conversations()] == ["trash-chat"]
+    trash_list = client.get("/api/conversations/trash")
+    assert trash_list.status_code == 200, trash_list.text
+    assert [row["id"] for row in trash_list.json()] == ["trash-chat"]
     assert db.fetchone("SELECT status FROM run_operations WHERE operation_id = ?", (
         "trash-uncertain-operation",
     ))["status"] == "uncertain"
@@ -387,5 +390,5 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
     ))["status"] == "uncertain"
 
     # Restoring the chat never silently resolves its unknown external effect.
-    with pytest.raises(Exception, match="active, recoverable, or unresolved"):
+    with pytest.raises(database.ConversationHasUnresolvedRunError):
         db.delete_conversation("trash-chat")
