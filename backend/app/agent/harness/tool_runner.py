@@ -30,6 +30,7 @@ from app.agent.memory_manager import MemoryManager
 from app.agent.state import ExecutionPlan, PlanStep
 from app.agent.steering import SteeringInbox
 from app.agent.tool_registry import ToolRegistry, can_parallelize
+from app.agent.explicit_tool_scope import explicit_tool_scope, filter_tool_calls
 from app.agent.tool_observations import (
     DEVTOOLS_PREFIX, DEVTOOLS_STEP_DESCRIPTIONS, compact_tool_observation, extract_image_attachments,
     is_devtools_tool, tool_error_code,
@@ -580,7 +581,21 @@ class ToolBatchRunner:
             self.pause = TurnOutcome(summary="", status="paused", reason_code="user_pause")
             return BatchOutcome(self.pause)
         self.recovery.begin_round()
-        self._execution_plan = self._build_execution_plan(self.user_request(), calls)
+        request_text = self.user_request()
+        scope = explicit_tool_scope(request_text)
+        scoped_calls = list(calls)
+        blocked_by_scope: list[str] = []
+        if scope is not None:
+            scoped_calls, blocked_by_scope = filter_tool_calls(scope, calls)
+            if not scoped_calls:
+                summary = (
+                    f"Explicit tool restriction allowed only `{scope.allowed_tool}`. "
+                    f"No requested tool matched; blocked without dispatch: {', '.join(blocked_by_scope)}."
+                )
+                self.pause = TurnOutcome(summary=summary, status="paused", reason_code="explicit_tool_scope_enforced")
+                self.emit({"event": "progress", "data": {"content": summary}})
+                return BatchOutcome(self.pause)
+        self._execution_plan = self._build_execution_plan(request_text, scoped_calls)
         steps = {step.step_id: step for step in self._execution_plan.steps}
         self.emit({"event": "plan", "data": self._execution_plan.to_dict()})
         self._sync_plan()
@@ -632,7 +647,19 @@ class ToolBatchRunner:
                 break
             if self.pause is not None:
                 break
-        self.pause = self.pause or self.recovery.finish_round(len(calls))
+        self.pause = self.pause or self.recovery.finish_round(len(scoped_calls))
+        if blocked_by_scope and self.pause is None:
+            summary = (
+                f"Explicit tool restriction enforced: executed only `{scope.allowed_tool}`; "
+                f"blocked additional tool call(s) before dispatch: {', '.join(blocked_by_scope)}. "
+                "The turn stopped without invoking any other tool."
+            )
+            self.pause = TurnOutcome(
+                summary=summary,
+                status="paused",
+                reason_code="explicit_tool_scope_enforced",
+            )
+            self.emit({"event": "progress", "data": {"content": summary}})
         if self.recovery.round_hint and self.pause is None:
             self.transcript.append({"role": "user", "content": self.recovery.round_hint})
             self.emit({"event": "progress", "data": {"content": "The recent results are unchanged; checking another approach."}})
