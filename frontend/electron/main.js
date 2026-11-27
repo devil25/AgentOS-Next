@@ -721,6 +721,7 @@ app.whenReady().then(async () => {
     return
   }
   if (!currentBackendLaunch().frozen) backendUvCommand = await pickBackendUv()
+  await startEmbeddedBrowserBridge()
   spawnBackend()
   createWindow()
 
