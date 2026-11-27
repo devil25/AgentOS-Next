@@ -666,7 +666,7 @@ async function inspectEmbeddedAccessibilityMessages() {
       const ownText = role === 'statictext' || role === 'paragraph' || role === 'heading' ? own : ''
       const children = Array.isArray(node.childIds) ? node.childIds : []
       const childText = children.map(child => textFor(child, depth + 1, seen)).filter(Boolean)
-      return [ownText, ...childText].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 20000)
+      return [ownText, ...childText].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 20000)
     }
     const messages = []
     for (const node of rawNodes) {
@@ -675,8 +675,8 @@ async function inspectEmbeddedAccessibilityMessages() {
       const name = String(node?.name?.value || '').trim()
       const description = String(node?.description?.value || '').trim()
       const hint = [name, description, node?.value?.value || ''].join(' ').toLowerCase()
-      const messageRole = /\\b(user|human|you said|you:|your message)\\b/.test(hint) ? 'user'
-        : /\\b(assistant|chatgpt|model response|chatgpt said)\\b/.test(hint) ? 'assistant' : ''
+      const messageRole = /\b(user|human|you said|you:|your message)\b/.test(hint) ? 'user'
+        : /\b(assistant|chatgpt|model response|chatgpt said)\b/.test(hint) ? 'assistant' : ''
       if (!messageRole) continue
       const text = (name && !/^(user|assistant|chatgpt|you said|chatgpt said)$/i.test(name)
         ? name : textFor(node.nodeId)).trim().slice(0, 20000)
