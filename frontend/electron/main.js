@@ -644,29 +644,44 @@ async function inspectEmbeddedAccessibilityMessages() {
   if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) return []
   const debuggerClient = embeddedBrowserView.webContents.debugger
   let attachedHere = false
+  let commandTimer = null
   try {
     if (!debuggerClient.isAttached()) {
       debuggerClient.attach('1.3')
       attachedHere = true
     }
-    // One bounded CDP round-trip only. Resolving every AX node individually
-    // caused slow, serial debugger traffic and could stall the conversation
-    // endpoint while ChatGPT was rendering a response.
-    const tree = await debuggerClient.sendCommand('Accessibility.getFullAXTree')
+    // Accessibility.getFullAXTree can stall on a large, continuously-rendering
+    // chat page. Keep this read strictly below the backend bridge's 12s limit.
+    const tree = await Promise.race([
+      debuggerClient.sendCommand('Accessibility.getFullAXTree', { maxDepth: 20 }),
+      new Promise((_, reject) => {
+        commandTimer = setTimeout(() => reject(new Error('Accessibility snapshot exceeded its 3.5s budget')), 3500)
+      }),
+    ])
+    if (commandTimer) clearTimeout(commandTimer)
+    commandTimer = null
     const rawNodes = Array.isArray(tree?.nodes) ? tree.nodes.slice(0, 4000) : []
     const byId = new Map(rawNodes.map(node => [String(node.nodeId), node]))
     const textFor = (nodeId, depth = 0, seen = new Set()) => {
-      if (depth > 24 || seen.size >= 400 || seen.has(String(nodeId))) return ''
+      if (depth > 20 || seen.size >= 400 || seen.has(String(nodeId))) return ''
       const key = String(nodeId)
       const node = byId.get(key)
       if (!node) return ''
       seen.add(key)
       const own = String(node.name?.value ?? '').trim()
       const role = String(node.role?.value || '').toLowerCase()
-      const ownText = role === 'statictext' || role === 'paragraph' || role === 'heading' ? own : ''
+      const ownText = ['statictext', 'paragraph', 'heading'].includes(role) ? own : ''
       const children = Array.isArray(node.childIds) ? node.childIds : []
       const childText = children.map(child => textFor(child, depth + 1, seen)).filter(Boolean)
-      return [ownText, ...childText].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 20000)
+      return [ownText, ...childText].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 20000)
+    }
+    const descendants = (nodeId, depth = 0, seen = new Set()) => {
+      if (depth > 20 || seen.size >= 500 || seen.has(String(nodeId))) return []
+      const key = String(nodeId)
+      const node = byId.get(key)
+      if (!node) return []
+      seen.add(key)
+      return [node, ...(Array.isArray(node.childIds) ? node.childIds.flatMap(child => descendants(child, depth + 1, seen)) : [])]
     }
     const messages = []
     for (const node of rawNodes) {
@@ -674,12 +689,18 @@ async function inspectEmbeddedAccessibilityMessages() {
       if (!['article', 'group', 'region'].includes(role)) continue
       const name = String(node?.name?.value || '').trim()
       const description = String(node?.description?.value || '').trim()
+      const subtree = descendants(node.nodeId)
       const bodyText = textFor(node.nodeId)
+      const controls = subtree
+        .filter(child => String(child?.role?.value || '').toLowerCase() === 'button')
+        .map(child => String(child?.name?.value || '').toLowerCase())
       const hint = [name, description, node?.value?.value || '', bodyText.slice(0, 600)].join(' ').toLowerCase()
       const userPrefix = /(?:^|\\s)(?:you said|your message|user message|user):\\s*/i
       const assistantPrefix = /(?:^|\\s)(?:chatgpt said|assistant response|assistant|chatgpt):\\s*/i
-      const messageRole = userPrefix.test(hint) ? 'user'
-        : assistantPrefix.test(hint) ? 'assistant' : ''
+      const hasAssistantControls = controls.some(label => /\\b(copy|read aloud|good response|bad response|regenerate|retry)\\b/i.test(label))
+      const hasUserControls = controls.some(label => /\\b(edit message|edit)\\b/i.test(label))
+      const messageRole = userPrefix.test(hint) || hasUserControls ? 'user'
+        : assistantPrefix.test(hint) || hasAssistantControls ? 'assistant' : ''
       if (!messageRole) continue
       const text = (bodyText || name).replace(/^(?:you said|your message|user message|user|chatgpt said|assistant response|assistant|chatgpt):\\s*/i, '').trim().slice(0, 20000)
       if (!text) continue
@@ -699,6 +720,9 @@ async function inspectEmbeddedAccessibilityMessages() {
     console.warn('[embedded-browser] Accessibility snapshot unavailable:', String(error?.message || error).slice(0, 300))
     return []
   } finally {
+    if (commandTimer) clearTimeout(commandTimer)
+    // Detach only when this function attached the debugger. A timeout must not
+    // leave a debugger session that blocks subsequent reads.
     if (attachedHere && debuggerClient.isAttached()) {
       try { debuggerClient.detach() } catch {}
     }
