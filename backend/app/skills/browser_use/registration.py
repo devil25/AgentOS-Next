@@ -5,7 +5,7 @@ from typing import Any
 
 from .tools import (
     browser_fetch, embedded_browser_click, embedded_browser_navigate, embedded_browser_press_key,
-    embedded_browser_read, embedded_browser_snapshot, embedded_browser_type,
+    embedded_browser_conversation, embedded_browser_read, embedded_browser_snapshot, embedded_browser_type,
 )
 
 
@@ -103,6 +103,14 @@ def register_browser_tools(registry, settings) -> None:
                     "resource_locks": ["embedded_browser"],
                     "repeat_safe": True,
                 },
+            },
+            {
+                "name": "embedded_browser_conversation",
+                "description": "Read structured messages, composer readiness, login state, and generation state from the active embedded ChatGPT, Gemini, DeepSeek, or Z.ai conversation. Read-only observation.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+                "callable": lambda **_unused: embedded_browser_conversation(),
+                "domain": "browser", "execution_mode": "async", "timeout_seconds": 15.0,
+                "metadata": {"observation": True, "mutates_state": False, "risk_level": "low", "parallel_safe": False, "resource_locks": ["embedded_browser"], "repeat_safe": True},
             },
             {
                 "name": "embedded_browser_snapshot",
