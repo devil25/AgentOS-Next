@@ -674,7 +674,7 @@ function startEmbeddedBrowserBridge() {
         if (payload.action === 'type') {
           const value = String(payload.text || '')
           if (value.length > 4000) return send(413, { error: 'Text is too long (maximum 4000 characters)' })
-          const inserted = replaceFocusedText(webContents, value, process.platform)
+          const inserted = replaceFocusedText(webContents, value, process.platform, payload.append === true)
           return send(200, { ...result, ...inserted })
         }
         return send(200, result)
