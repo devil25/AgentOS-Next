@@ -145,6 +145,7 @@ class WebChatSessionAdapter:
         if not before.composer_ready:
             raise WebChatAdapterError("The provider message composer is not ready.")
         initial_identity = self._conversation_identity(before.url)
+        last_persisted_url = before.url
         if self.on_conversation_url is not None:
             self.on_conversation_url(before.url)
         previous_ids = {item.message_id for item in before.messages if item.role == "assistant"}
@@ -178,8 +179,9 @@ class WebChatSessionAdapter:
                     "The provider conversation changed while AgentOS was waiting; "
                     "the previous assistant message identities are no longer present."
                 )
-            if current.url != before.url and self.on_conversation_url is not None:
+            if current.url != last_persisted_url and self.on_conversation_url is not None:
                 self.on_conversation_url(current.url)
+                last_persisted_url = current.url
             if current.login_required:
                 raise WebChatAdapterError("The provider session expired. Sign in again in Chrome.")
             if current.blocked_reason:
