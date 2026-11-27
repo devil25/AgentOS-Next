@@ -103,7 +103,7 @@ class EmbeddedWebChatBrowserPort:
         snapshot = await self._call("embedded_browser_snapshot")
         elements = snapshot.get("elements") if isinstance(snapshot.get("elements"), list) else []
         pattern = re.compile(
-            r"^(?:new chat|new conversation|start new chat|new thread|محادثة جديدة|بدء محادثة)(?:\\b|\\s|$)",
+            r"^(?:new chat|new conversation|start new chat|new thread|محادثة جديدة|بدء محادثة)(?:\b|\s|$)",
             re.IGNORECASE,
         )
         matches = []
