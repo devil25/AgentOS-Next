@@ -36,12 +36,11 @@ export function EmbeddedBrowserPanel({ onClose }: { onClose: () => void }) {
     const element = viewportRef.current
     if (!element || !api) return
     const rect = element.getBoundingClientRect()
-    const drawerHeight = inspection ? 220 : 0
     void api.setBounds({
       x: rect.left,
       y: rect.top,
       width: rect.width,
-      height: Math.max(0, rect.height - drawerHeight),
+      height: Math.max(0, rect.height),
     }).catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not resize the browser'))
   }, [api, inspection])
 
