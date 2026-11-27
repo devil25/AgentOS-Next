@@ -91,26 +91,25 @@ test('embedded ChatGPT conversation detection has safe fallbacks and precise gen
   assert.doesNotMatch(main, /document\.querySelector\('\[aria-busy="true",\[data-testid\*="stop"/)
 })
 
-test('ChatGPT response capture uses a bounded single-call accessibility fallback', () => {
+test('ChatGPT response capture uses the complete legacy-style accessibility tree', () => {
   const start = main.indexOf('async function inspectEmbeddedAccessibilityMessages')
   const end = main.indexOf('function startEmbeddedBrowserBridge', start)
   const capture = main.slice(start, end)
   assert.match(capture, /Accessibility\.getFullAXTree/)
-  assert.match(capture, /maxDepth: 20/)
+  assert.match(capture, /maxDepth: 30/)
   assert.match(capture, /Accessibility snapshot exceeded its 3\.5s budget/)
   assert.match(capture, /Promise\.race/)
-  assert.match(capture, /slice\(0, 4000\)/)
+  assert.ok(capture.includes('const rawNodes = Array.isArray(tree?.nodes) ? tree.nodes : []'))
+  assert.doesNotMatch(capture, /slice\(0, 4000\)/)
   assert.match(capture, /messages\.length >= 100/)
   assert.match(capture, /hasAssistantControls/)
   assert.match(capture, /copy\|read aloud\|good response\|bad response\|regenerate/)
-  assert.doesNotMatch(capture, /DOM\.resolveNode|Runtime\.callFunctionOn/)
-  assert.match(capture, /chatgpt said/)
+  assert.match(capture, /ancestorHint/)
+  assert.match(capture, /roleDescription/)
   assert.match(capture, /backendDOMNodeId \|\| node\.nodeId/)
-  assert.match(capture, /stable across accessibility snapshots/)
+  assert.doesNotMatch(capture, /DOM\.resolveNode|Runtime\.callFunctionOn/)
   assert.match(main, /snapshot\.captureSource = 'accessibility_tree'/)
-  assert.match(main, /inspectEmbeddedAccessibilityMessages\(\)/)
-  assert.match(main, /Prefer the legacy AgentOS evidence model for every read/)
-  assert.match(main, /snapshot\.messages = accessibilityMessages/)
+  assert.match(main, /snapshot\.messages = accessibility\.messages/)
 })
 
 test('ChatGPT Enter submits through the enabled Send button when available', () => {
@@ -193,4 +192,18 @@ test('sending a web-chat message does not open or foreground the embedded browse
   const handleSend = app.slice(app.indexOf('const handleSend ='), app.indexOf('// A new chat gets its id'))
   assert.match(handleSend, /setEmbeddedBrowserProvider\(webChatTarget\.provider\)/)
   assert.doesNotMatch(handleSend, /setShowEmbeddedBrowser\(true\)|embedded\.open\(/)
+})
+
+
+test('ChatGPT capture falls back to visible main-region evidence when AX messages are unavailable', () => {
+  const start = main.indexOf('async function inspectEmbeddedAccessibilityMessages')
+  const end = main.indexOf('function startEmbeddedBrowserBridge', start)
+  const capture = main.slice(start, end)
+  assert.ok(capture.includes('const rawNodes = Array.isArray(tree?.nodes) ? tree.nodes : []'))
+  assert.doesNotMatch(capture, /slice\(0, 4000\)/)
+  assert.match(capture, /node\.parentId/)
+  assert.match(capture, /roledescription/)
+  assert.match(main, /contentRoot = document\.querySelector\('main,\[role="main"\]'\)/)
+  assert.match(main, /visible_page_text_fallback/)
+  assert.match(main, /snapshot\.pageText = String\(pageEvidence\?\.text \|\| ''\)\.slice\(0, 12000\)/)
 })
