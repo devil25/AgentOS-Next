@@ -171,17 +171,24 @@ class WebChatSessionAdapter:
             if current_provider != expected_provider:
                 raise WebChatAdapterError("The selected tab navigated away from the chosen provider.")
             current_identity = self._conversation_identity(current.url)
-            if pinned_identity is None:
-                # A provider may create a conversation path after the first
-                # prompt from its home page. Pin that newly-created path once.
-                if current_identity[1] != "/":
-                    pinned_identity = current_identity
-                    if self.on_conversation_url is not None:
-                        self.on_conversation_url(current.url)
-                elif current_identity != initial_identity:
-                    raise WebChatAdapterError("The provider conversation changed while AgentOS was waiting; no further action will be sent.")
-            elif current_identity != pinned_identity:
-                raise WebChatAdapterError("The provider conversation changed while AgentOS was waiting; no further action will be sent.")
+            if current_identity[0] != initial_identity[0]:
+                raise WebChatAdapterError("The selected tab navigated away from the chosen provider.")
+            # The legacy AgentOS browser did not bind a task to a URL path.
+            # It used stable Chromium backendDOMNodeId identities across full
+            # accessibility snapshots. Apply that same continuity rule here:
+            # SPA route changes are allowed only while prior assistant nodes
+            # remain present; a different conversation with no shared history
+            # is rejected before any further action can be sent.
+            current_assistant_ids = {
+                item.message_id for item in current.messages if item.role == "assistant"
+            }
+            if previous_ids and not (previous_ids & current_assistant_ids):
+                raise WebChatAdapterError(
+                    "The provider conversation changed while AgentOS was waiting; "
+                    "the previous assistant message identities are no longer present."
+                )
+            if current.url != before.url and self.on_conversation_url is not None:
+                self.on_conversation_url(current.url)
             if current.login_required:
                 raise WebChatAdapterError("The provider session expired. Sign in again in Chrome.")
             if current.blocked_reason:
