@@ -15,6 +15,30 @@ class BrowserWorkflow:
         self._scripts = 0
 
     def observe(self, name: str, arguments: dict, output: str, status: str) -> str:
+        if name == "embedded_browser_conversation":
+            if status != "ok":
+                return self._hint(
+                    "embedded_conversation_failed",
+                    "The embedded conversation read failed. Do not repeat the same read on an unchanged page; report the capture error or choose a different, justified recovery action.",
+                )
+            payload = parse_tool_json(output)
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            has_assistant = any(
+                isinstance(item, dict)
+                and item.get("role") == "assistant"
+                and str(item.get("text") or "").strip()
+                for item in messages
+            )
+            has_page_text = bool(str(payload.get("pageText") or "").strip())
+            if has_assistant or has_page_text:
+                return self._hint(
+                    "embedded_conversation_read",
+                    "The latest embedded conversation exchange is already captured above. Use its latest assistant text/pageText as evidence and answer the user now. Do not call embedded_browser_conversation again unless a new browser action changed the page.",
+                )
+            return self._hint(
+                "embedded_conversation_empty",
+                "The browser conversation read returned no assistant message or visible page text. Do not poll the unchanged page again; explain that capture was unavailable.",
+            )
         if not name.startswith(DEVTOOLS_PREFIX):
             # Another tool (including desktop or scripts) may change the page.
             self._last_snapshot = self._last_fill = None
