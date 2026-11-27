@@ -736,7 +736,9 @@ def _workspace_key(value: object) -> str:
     return os.path.normcase(os.path.normpath(canonical))
 
 
-def assert_run_dispatch_allowed(durable_run: object) -> None:
+def assert_run_dispatch_allowed(
+    durable_run: object, *, allow_shared_workspace_read_only: bool = False
+) -> None:
     """Enforce the owner fence and block overlapping active durable scopes."""
     journal = _run_field(durable_run, "journal")
     run_id = _run_field(durable_run, "run_id")
@@ -792,7 +794,11 @@ def assert_run_dispatch_allowed(durable_run: object) -> None:
         # workspace; per-operation resource locks arbitrate tool overlap.
         # A shared conversation is still single-owner. Quarantined runs,
         # unresolved writes, and cross-process workspace overlap stay closed.
-        if same_conversation or (same_workspace and (quarantined or unresolved_write or cross_process_scope)):
+        if same_conversation or (
+            same_workspace
+            and (quarantined or unresolved_write or cross_process_scope)
+            and not allow_shared_workspace_read_only
+        ):
             raise DispatchConflictError("another durable run owns this conversation or workspace")
 
 
