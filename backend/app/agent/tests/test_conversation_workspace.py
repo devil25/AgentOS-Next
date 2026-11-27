@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.agent import conversation_workspace as workspace
 from app.agent import database, memory_manager, workspace_instructions
 from app.agent.runtime import AgentRuntime
-from app.agent.durable import Journal
+from app.agent.durable import InvalidTransitionError, Journal
 from app.agent.steering import SteeringInbox, register_steering, unregister_steering
 from app.main import app
 from app.skills.exec import tools as exec_tools
@@ -372,6 +372,17 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
         "trash-uncertain-operation",
     ))["status"] == "uncertain"
     assert db.fetchone("SELECT run_id FROM agent_runs WHERE run_id = ?", ("trash-run",))["run_id"] == "trash-run"
+
+    # Direct Run creation paths (including scheduled work) must also respect Trash.
+    with pytest.raises(InvalidTransitionError, match="trashed conversation"):
+        journal.create_run(
+            run_id="trash-new-run",
+            conversation_id="trash-chat",
+            execution_source="scheduled",
+            owner_instance_id="trash-owner",
+            turn_id="trash-new-turn",
+            workspace_dir="C:/work",
+        )
 
     blocked = client.post("/api/chat", json={
         "message": "This must wait until the conversation is restored.",
