@@ -100,9 +100,19 @@ test('embedded browser text entry and Enter use native Electron input events', (
     { kind: 'input', type: 'keyDown', keyCode: 'Enter' },
     { kind: 'input', type: 'keyUp', keyCode: 'Enter' },
   ])
-  assert.match(main, /replaceFocusedText\(webContents, value, process\.platform\)/)
+  assert.match(main, /replaceFocusedText\(webContents, value, process\.platform, payload\.append === true\)/)
   assert.match(main, /sendNativeKey\(webContents, key\)/)
   assert.doesNotMatch(main, /target\.dispatchEvent\(new KeyboardEvent/)
+})
+
+test('embedded browser appends subsequent prompt chunks without clearing earlier text', () => {
+  const events = []
+  const webContents = {
+    sendInputEvent: (event) => events.push(event),
+    insertText: (text) => events.push({ type: 'text', text }),
+  }
+  replaceFocusedText(webContents, 'second chunk', 'win32', true)
+  assert.deepEqual(events, [{ type: 'text', text: 'second chunk' }])
 })
 
 test('embedded browser native text replacement uses the macOS command modifier', () => {
