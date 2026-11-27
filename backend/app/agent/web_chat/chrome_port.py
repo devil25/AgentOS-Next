@@ -32,10 +32,12 @@ class ChromeWebChatBrowserPort:
 
     _PREFIX = "mcp__chrome-devtools__"
 
-    def __init__(self, execute_tool: AuthorizedBrowserToolExecutor | None = None) -> None:
+    def __init__(self, execute_tool: AuthorizedBrowserToolExecutor | None = None, *, provider: str | None = None) -> None:
         if execute_tool is not None and not callable(execute_tool):
             raise TypeError("The Chrome browser-tool executor must be callable.")
         self._execute_tool = execute_tool
+        self.provider = provider
+        self.resolved_page_id: int | None = None
 
     def bind_executor(self, execute_tool: AuthorizedBrowserToolExecutor) -> None:
         """Bind the active run's ToolBatchRunner transport after runtime setup."""
@@ -97,7 +99,39 @@ class ChromeWebChatBrowserPort:
             raise WebChatAdapterError("Chrome returned an invalid web-chat inspection result.")
         return value
 
-    async def inspect(self, tab_id: int) -> ConversationSnapshot:
+    async def _resolve_page_id(self) -> int:
+        if self.provider is None:
+            raise WebChatAdapterError("A provider is required for automatic Chrome page discovery.")
+        result = await self._call("list_pages", {})
+        pages_text = self._result_text(result)
+        matches: list[tuple[int, str, str]] = []
+        for line in pages_text.splitlines():
+            match = re.match(r"^\\s*(\\d+):\\s*(.*?)\\s*$", line)
+            if not match:
+                continue
+            page_id = int(match.group(1))
+            url_match = re.search(r"https?://[^\\s)]+", match.group(2))
+            if not url_match:
+                continue
+            url = url_match.group(0).rstrip(".,;")
+            if provider_for_url(url) == self.provider:
+                matches.append((page_id, match.group(2), url))
+        if not matches:
+            raise WebChatAdapterError(
+                f"No open Chrome tab was found for {self.provider}. Open its website in Chrome and sign in, then retry."
+            )
+        if len(matches) > 1:
+            choices = "; ".join(f"Page {page_id}: {title}" for page_id, title, _url in matches[:8])
+            raise WebChatAdapterError(
+                f"More than one {self.provider} tab is open. Close the tabs you do not want and retry, or choose one explicitly. {choices}"
+            )
+        self.resolved_page_id = matches[0][0]
+        return self.resolved_page_id
+
+    async def inspect(self, tab_id: int | None) -> ConversationSnapshot:
+        if tab_id is None:
+            tab_id = await self._resolve_page_id()
+        self.resolved_page_id = tab_id
         value = self._decode_json(await self._call("inspect_web_chat", {"pageId": tab_id}))
         url = str(value.get("url") or "")
         if provider_for_url(url) is None:
