@@ -251,3 +251,30 @@ test('ChatGPT capture falls back to visible main-region evidence when AX message
   assert.match(main, /visible_page_text_fallback/)
   assert.match(main, /snapshot\.pageText = String\(pageEvidence\?\.text \|\| ''\)\.slice\(0, 12000\)/)
 })
+
+
+test('embedded companion extension is packaged and loaded into each persistent provider session', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../../browser-companion/manifest.json'), 'utf8'))
+  const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'))
+  assert.equal(manifest.manifest_version, 3)
+  assert.ok(manifest.content_scripts.some(item => item.matches.includes('https://chatgpt.com/*')))
+  assert.ok(manifest.content_scripts.some(item => item.matches.includes('https://gemini.google.com/*')))
+  assert.ok(packageJson.build.extraResources.some(item => item.to === 'browser-companion'))
+  assert.match(main, /browserSession\.extensions/)
+  assert.match(main, /ensureEmbeddedCompanion\(browserSession\)/)
+  assert.match(main, /embeddedCompanionLoadedSessions/)
+})
+
+test('background companion observations are authenticated, provider-bound, and size-limited', () => {
+  assert.match(main, /\/v1\/companion\/event/)
+  assert.match(main, /payload\.provider !== currentProvider/)
+  assert.match(main, /new URL\(offeredUrl\)\.origin !== new URL\(currentUrl\)\.origin/)
+  assert.match(main, /const maxBodyLength = companionEvent \? 256 \* 1024/)
+  assert.match(main, /captureSource: 'extension_companion'/)
+})
+
+test('ChatGPT send confirmation uses the rendered user message, not composer clearing', () => {
+  assert.match(main, /if \(state\?\.userMessageVisible\)/)
+  assert.match(main, /composerEmpty: Boolean\(state\.composerEmpty\)/)
+  assert.doesNotMatch(main, /if \(state\?\.composerFound && state\?\.composerEmpty && state\?\.userMessageVisible\)/)
+})

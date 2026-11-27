@@ -498,6 +498,50 @@ function embeddedSafeUrl(value) {
   return parsed.href
 }
 
+function embeddedProviderForUrl(value) {
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol !== 'https:') return null
+    return Object.entries(EMBEDDED_PROVIDERS).find(([, providerUrl]) =>
+      new URL(providerUrl).hostname === parsed.hostname
+    )?.[0] || null
+  } catch {
+    return null
+  }
+}
+
+function embeddedCompanionSourceDirectory() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'browser-companion')
+    : path.join(__dirname, '../../browser-companion')
+}
+
+async function ensureEmbeddedCompanion(browserSession) {
+  if (embeddedCompanionLoadedSessions.has(browserSession)) return true
+  const sourceDirectory = embeddedCompanionSourceDirectory()
+  if (!fs.existsSync(path.join(sourceDirectory, 'manifest.json'))) {
+    throw new Error('The AgentOS Browser Companion files are missing')
+  }
+  const runtimeDirectory = path.join(getBackendRuntimeDir(), 'browser-companion')
+  fs.mkdirSync(path.dirname(runtimeDirectory), { recursive: true })
+  fs.cpSync(sourceDirectory, runtimeDirectory, { recursive: true, force: true })
+  fs.writeFileSync(
+    path.join(runtimeDirectory, 'pairing.json'),
+    JSON.stringify({ port: embeddedBrowserBridgePort, token: EMBEDDED_BROWSER_BRIDGE_SECRET }),
+    { encoding: 'utf8', mode: 0o600 }
+  )
+  const extensions = browserSession.extensions
+  if (!extensions || typeof extensions.loadExtension !== 'function') {
+    throw new Error('This Electron runtime does not expose session extension loading')
+  }
+  const alreadyLoaded = typeof extensions.getAllExtensions === 'function'
+    && extensions.getAllExtensions().some(item => item.name === 'AgentOS Browser Companion')
+  if (!alreadyLoaded) await extensions.loadExtension(runtimeDirectory, { allowFileAccess: false })
+  embeddedCompanionLoadedSessions.add(browserSession)
+  console.log('[embedded-browser] Background companion loaded for provider session')
+  return true
+}
+
 function publishEmbeddedBrowserState(extra = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   const view = embeddedBrowserView
@@ -546,6 +590,9 @@ let embeddedBrowserBridgeServer = null
 let embeddedBrowserBridgePort = 0
 const EMBEDDED_BROWSER_BRIDGE_SECRET = generateControlSecret()
 const EMBEDDED_BROWSER_ISOLATED_WORLD_ID = 1337
+let embeddedCompanionSnapshot = null
+let embeddedBrowserPendingSubmission = null
+const embeddedCompanionLoadedSessions = new WeakSet()
 
 const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
   const visible = (element) => {
@@ -826,20 +873,69 @@ function startEmbeddedBrowserBridge() {
         response.end(JSON.stringify(payload))
       }
       if (!loopback || !authorized) return send(401, { error: 'Unauthorized' })
-      if (request.method !== 'POST' || !['/v1/inspect', '/v1/action', '/v1/conversation'].includes(request.url)) return send(404, { error: 'Not found' })
+      const companionEvent = request.url === '/v1/companion/event'
+      if (request.method !== 'POST' || !['/v1/inspect', '/v1/action', '/v1/conversation', '/v1/companion/event'].includes(request.url)) return send(404, { error: 'Not found' })
       let body = ''
+      const maxBodyLength = companionEvent ? 256 * 1024 : 16 * 1024
       for await (const chunk of request) {
         body += chunk.toString('utf8')
-        if (body.length > 16 * 1024) return send(413, { error: 'Request too large' })
+        if (body.length > maxBodyLength) return send(413, { error: 'Request too large' })
       }
       let requestAction = ''
       try {
+        if (companionEvent) {
+          const payload = body ? JSON.parse(body) : {}
+          const currentContents = embeddedBrowserView && !embeddedBrowserView.webContents.isDestroyed()
+            ? embeddedBrowserView.webContents : null
+          if (!currentContents || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return send(409, { error: 'No active embedded provider page is available' })
+          }
+          const currentUrl = embeddedSafeUrl(currentContents.getURL())
+          const currentProvider = embeddedProviderForUrl(currentUrl)
+          let offeredUrl
+          try { offeredUrl = embeddedSafeUrl(payload.url) } catch { return send(400, { error: 'Invalid companion page URL' }) }
+          if (!currentProvider || payload.provider !== currentProvider || payload.provider !== embeddedBrowserProvider
+            || new URL(offeredUrl).origin !== new URL(currentUrl).origin) {
+            return send(409, { error: 'Companion observation does not match the active provider page' })
+          }
+          const messages = Array.isArray(payload.messages) ? payload.messages.slice(-50).map((item, index) => ({
+            message_id: String(item?.message_id || `companion-${index}`).slice(0, 200),
+            role: item?.role === 'user' || item?.role === 'assistant' ? item.role : '',
+            text: String(item?.text || '').slice(0, 2500),
+            complete: item?.complete !== false,
+          })).filter(item => item.role && item.text.trim()) : []
+          embeddedCompanionSnapshot = {
+            provider: currentProvider,
+            title: String(payload.title || currentContents.getTitle()).slice(0, 300),
+            url: currentUrl,
+            messages,
+            composerReady: Boolean(payload.composerReady),
+            generating: Boolean(payload.generating),
+            loginRequired: Boolean(payload.loginRequired),
+            stable: Boolean(payload.stable),
+            stableForMs: Math.max(0, Math.min(60000, Number(payload.stableForMs) || 0)),
+            observedAt: Date.now(),
+            captureSource: 'extension_companion',
+          }
+          return send(202, { ok: true, accepted: true, messageCount: messages.length })
+        }
         if (request.url === '/v1/inspect') return send(200, await inspectEmbeddedBrowserPage())
         if (request.url === '/v1/conversation') {
           if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
-          const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
-          const snapshot = await executeEmbeddedBrowserScript(embeddedBrowserView.webContents, script)
-          if (snapshot?.provider === 'chatgpt') {
+          const activeUrl = embeddedSafeUrl(embeddedBrowserView.webContents.getURL())
+          const companion = embeddedCompanionSnapshot
+          const companionMatches = companion
+            && Date.now() - companion.observedAt < 30000
+            && companion.provider === embeddedBrowserProvider
+            && new URL(companion.url).origin === new URL(activeUrl).origin
+          let snapshot
+          if (companionMatches) {
+            snapshot = { ...companion, companionObservedAt: companion.observedAt }
+          } else {
+            const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
+            snapshot = await executeEmbeddedBrowserScript(embeddedBrowserView.webContents, script)
+          }
+          if (snapshot?.provider === 'chatgpt' && snapshot.captureSource !== 'extension_companion') {
             // Keep DOM text when available and enrich matching messages with
             // Chromium's stable backend DOM identities for continuity checks.
             const accessibility = await inspectEmbeddedAccessibilityMessages()
@@ -884,7 +980,7 @@ function startEmbeddedBrowserBridge() {
               snapshot.pageText = String(pageEvidence?.text || '').slice(0, 12000)
               snapshot.captureSource = snapshot.pageText ? 'visible_page_text_fallback' : 'none'
             }
-          } else {
+          } else if (snapshot.captureSource !== 'extension_companion') {
             snapshot.captureSource = 'dom'
           }
           return send(200, snapshot)
@@ -974,10 +1070,21 @@ function startEmbeddedBrowserBridge() {
                 ).some(element => String(element.innerText || element.textContent || '').includes(expectedPrefix))
                 return { composerFound: Boolean(composer), composerEmpty: Boolean(composer) && !value, userMessageVisible }
               })()`)
-              if (state?.composerFound && state?.composerEmpty && state?.userMessageVisible) {
+              if (state?.userMessageVisible) {
+                // The provider rendering the exact submitted user message is
+                // the authoritative send acknowledgement. Composer clearing is
+                // deliberately diagnostic only: some provider builds retain
+                // draft text after accepting a message.
+                embeddedBrowserPendingSubmission = {
+                  provider: 'chatgpt',
+                  origin: new URL(webContents.getURL()).origin,
+                  textPrefix: expectedPrefix,
+                  submittedAt: Date.now(),
+                }
                 return send(200, {
                   ok: true, action: 'press_key', key,
-                  submitted: true, submissionVerified: true, method: submissionMethod,
+                  submitted: true, submissionVerified: true, composerEmpty: Boolean(state.composerEmpty),
+                  method: submissionMethod,
                 })
               }
               await new Promise(resolve => setTimeout(resolve, 150))
@@ -1039,7 +1146,7 @@ function stopEmbeddedBrowserBridge() {
   embeddedBrowserBridgePort = 0
 }
 
-function attachEmbeddedBrowser(provider, { visible = true } = {}) {
+async function attachEmbeddedBrowser(provider, { visible = true } = {}) {
   if (!Object.hasOwn(EMBEDDED_PROVIDERS, provider)) throw new Error('Unsupported AI provider')
   if (embeddedBrowserView && embeddedBrowserProvider === provider && !embeddedBrowserView.webContents.isDestroyed()) {
     embeddedBrowserVisible = visible
@@ -1053,6 +1160,13 @@ function attachEmbeddedBrowser(provider, { visible = true } = {}) {
   }
   closeEmbeddedBrowser()
   const browserSession = session.fromPartition(`persist:agentos-embedded-${provider}`)
+  try {
+    await ensureEmbeddedCompanion(browserSession)
+  } catch (error) {
+    console.error('[embedded-browser] Background companion unavailable:', error.message)
+  }
+  embeddedCompanionSnapshot = null
+  embeddedBrowserPendingSubmission = null
   // Remote sites receive no Electron permissions by default. A future explicit
   // permission flow can grant individual capabilities after user confirmation.
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
@@ -1202,7 +1316,7 @@ app.whenReady().then(async () => {
   // Start the default signed-in ChatGPT session with AgentOS. Keep its
   // WebContentsView hidden from the UI but fully sized and active for tools.
   try {
-    attachEmbeddedBrowser('chatgpt', { visible: false })
+    await attachEmbeddedBrowser('chatgpt', { visible: false })
     console.log('[embedded-browser] Background ChatGPT session initialized')
   } catch (error) {
     console.error('[embedded-browser] Background session initialization failed:', error.message)
