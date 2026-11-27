@@ -424,3 +424,50 @@ async def test_web_chat_client_handles_large_global_catalog_by_sending_relevant_
     assert response.finish_reason == "tool_calls"
     assert "terminal.execute" in adapter.prompts[0][1]
     assert "unrelated.tool_99" not in adapter.prompts[0][1]
+
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_stops_consecutive_identical_conversation_reads_with_new_action_ids():
+    def read_action(action_id):
+        payload = {
+            "protocol": "agentos.v1",
+            "type": "action",
+            "id": action_id,
+            "action": "embedded_browser_conversation",
+            "arguments": {},
+        }
+        import json
+        return FENCE + "json\\n" + json.dumps(payload) + "\\n" + FENCE
+
+    adapter = FakeAdapter([
+        read_action("read-1"),
+        read_action("read-2"),
+        read_action("read-3"),
+    ])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    tools = [{
+        "name": "embedded_browser_conversation",
+        "description": "Read the active embedded AI conversation",
+        "parameters": {"type": "object", "properties": {}},
+    }]
+    user = {"role": "user", "content": "Read the response in the browser"}
+    first = await client.chat_with_tools(messages=[user], tools=tools)
+    assert first.finish_reason == "tool_calls"
+    result_one = {
+        "role": "user",
+        "content": "AgentOS tool result: captureSource=visible_page_text_fallback; pageText=answer",
+        "tool_result": True,
+        "web_chat_action_result": True,
+    }
+    second = await client.chat_with_tools(messages=[user, result_one], tools=tools)
+    assert second.finish_reason == "tool_calls"
+    result_two = {
+        "role": "user",
+        "content": "AgentOS tool result: same pageText=answer",
+        "tool_result": True,
+        "web_chat_action_result": True,
+    }
+    with pytest.raises(RuntimeError, match="repeated embedded_browser_conversation"):
+        await client.chat_with_tools(messages=[user, result_one, result_two], tools=tools)
+    assert len(adapter.prompts) == 3
