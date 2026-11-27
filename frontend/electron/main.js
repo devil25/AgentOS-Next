@@ -676,7 +676,7 @@ async function inspectEmbeddedAccessibilityMessages() {
       const ownText = ['statictext', 'paragraph', 'heading', 'listmarker'].includes(role) ? own : ''
       const children = Array.isArray(node.childIds) ? node.childIds : []
       const childText = children.map(child => textFor(child, depth + 1, seen)).filter(Boolean)
-      return [ownText, ...childText].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 20000)
+      return [ownText, ...childText].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 20000)
     }
     const descendants = (nodeId, depth = 0, seen = new Set()) => {
       if (depth > 30 || seen.size >= 2000 || seen.has(String(nodeId))) return []
@@ -721,15 +721,15 @@ async function inspectEmbeddedAccessibilityMessages() {
         name, description, node?.value?.value || '', roleDescription(node),
         ancestorHint(node), bodyText.slice(0, 1200),
       ].join(' ').toLowerCase()
-      const userPrefix = /(?:^|\\s)(?:you said|your message|user message|user|from you):?\\s*/i
-      const assistantPrefix = /(?:^|\\s)(?:chatgpt said|assistant response|assistant|chatgpt|from chatgpt):?\\s*/i
-      const hasAssistantControls = controls.some(label => /\\b(copy|read aloud|good response|bad response|regenerate|retry|share response)\\b/i.test(label))
-      const hasUserControls = controls.some(label => /\\b(edit message|edit your message)\\b/i.test(label))
+      const userPrefix = /(?:^|\s)(?:you said|your message|user message|user|from you):?\s*/i
+      const assistantPrefix = /(?:^|\s)(?:chatgpt said|assistant response|assistant|chatgpt|from chatgpt):?\s*/i
+      const hasAssistantControls = controls.some(label => /\b(copy|read aloud|good response|bad response|regenerate|retry|share response)\b/i.test(label))
+      const hasUserControls = controls.some(label => /\b(edit message|edit your message)\b/i.test(label))
       const messageRole = userPrefix.test(hint) || hasUserControls ? 'user'
         : assistantPrefix.test(hint) || hasAssistantControls ? 'assistant' : ''
       if (!messageRole) continue
       const text = (bodyText || name)
-        .replace(/^(?:you said|your message|user message|user|from you|chatgpt said|assistant response|assistant|chatgpt|from chatgpt):?\\s*/i, '')
+        .replace(/^(?:you said|your message|user message|user|from you|chatgpt said|assistant response|assistant|chatgpt|from chatgpt):?\s*/i, '')
         .trim().slice(0, 20000)
       if (!text) continue
       // Use the same backend-DOM identity strategy as the legacy AgentOS
