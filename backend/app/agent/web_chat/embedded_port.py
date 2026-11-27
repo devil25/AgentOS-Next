@@ -94,6 +94,7 @@ class EmbeddedWebChatBrowserPort:
             generating=bool(payload.get("generating")),
             login_required=bool(payload.get("loginRequired")),
             blocked_reason=str(payload.get("blockedReason") or ""),
+            context_limit=bool(payload.get("contextLimit")),
         )
 
     async def start_new_conversation(self) -> str:
