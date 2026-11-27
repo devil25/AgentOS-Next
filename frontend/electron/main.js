@@ -613,6 +613,35 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     return { title: document.title, url: location.href, provider, messages, composerReady: Boolean(composer), generating, loginRequired, contextLimit, blockedReason: '' }
   }
   if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
+  if (action === 'type') {
+    // Resolve the composer again at action time. Snapshot indexes are positional
+    // and can point at a different element after a provider re-render.
+    const editable = element =>
+      !element.disabled && !element.readOnly &&
+      (element.isContentEditable || element.tagName === 'TEXTAREA' ||
+        (element.tagName === 'INPUT' && !['password','file','hidden'].includes(String(element.type || 'text').toLowerCase())))
+    const composers = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
+      .filter(element => visible(element) && editable(element))
+    const preferred = composers.filter(element =>
+      element.id === 'prompt-textarea' ||
+      element.getAttribute('data-testid') === 'prompt-textarea'
+    )
+    const choices = preferred.length ? preferred : composers
+    if (choices.length !== 1) {
+      throw new Error(choices.length
+        ? 'Multiple editable composers are visible; no text was entered'
+        : 'No visible editable text composer was found; no text was entered')
+    }
+    const element = choices[0]
+    const value = String(args.text || '')
+    if (value.length > 4000) throw new Error('Text is too long (maximum 4000 characters)')
+    element.focus()
+    if (document.activeElement !== element && !element.contains(document.activeElement)) {
+      throw new Error('The selected text field could not receive focus')
+    }
+    // Actual text insertion is performed by Electron's native WebContents input API.
+    return { ok: true, action, index: elements.indexOf(element), characters: value.length }
+  }
   const index = Number(args.index)
   if (!Number.isInteger(index) || index < 0 || index >= elements.length) throw new Error('Element index is no longer available; take a fresh snapshot')
   const element = elements[index]
@@ -621,18 +650,6 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     element.scrollIntoView({ block: 'center', inline: 'nearest' })
     element.click()
     return { ok: true, action, index, description: describe(element, index) }
-  }
-  if (action === 'type') {
-    if (element.disabled || !(element.isContentEditable || ['INPUT','TEXTAREA'].includes(element.tagName))) throw new Error('The selected element is not an editable text field')
-    if (element.tagName === 'INPUT' && ['password','file','hidden'].includes(String(element.type).toLowerCase())) throw new Error('This input type is not supported')
-    const value = String(args.text || '')
-    if (value.length > 4000) throw new Error('Text is too long (maximum 4000 characters)')
-    element.focus()
-    if (document.activeElement !== element && !element.contains(document.activeElement)) {
-      throw new Error('The selected text field could not receive focus')
-    }
-    // Actual text insertion is performed by Electron's native WebContents input API.
-    return { ok: true, action, index, characters: value.length }
   }
   throw new Error('Unsupported embedded browser action')
 }`
