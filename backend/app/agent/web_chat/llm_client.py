@@ -10,7 +10,7 @@ import asyncio
 import json
 from typing import Any, Awaitable, Callable
 
-from .adapter import WebChatSessionAdapter
+from .adapter import WebChatContextLimitError, WebChatSessionAdapter
 from .protocol import action_instruction, build_provider_turn, parse_web_chat_reply
 
 
@@ -196,10 +196,55 @@ class WebChatLLMClient:
                 context_parts.append("Available AgentOS tools (names and schemas are authoritative):\n" + catalog_json)
                 prompt = build_provider_turn(goal, context="\n\n".join(context_parts))
 
-            turn = await self.adapter.send_and_wait(
-                tab_id=self.tab_id, prompt=prompt, expected_provider=self.web_chat_provider,
-                expected_conversation_url=self._conversation_url,
-            )
+            try:
+                turn = await self.adapter.send_and_wait(
+                    tab_id=self.tab_id, prompt=prompt, expected_provider=self.web_chat_provider,
+                    expected_conversation_url=self._conversation_url,
+                )
+            except WebChatContextLimitError:
+                # The provider explicitly refused the turn because its own
+                # conversation reached a limit. Start one fresh chat, then
+                # carry forward the original goal, durable task state and
+                # actual tool results. Never replay a tool call here.
+                new_url = await self.adapter.start_new_conversation()
+                self._conversation_url = new_url
+                if new_url and self.run_id:
+                    from .session_store import save_web_chat_run_context
+                    save_web_chat_run_context(
+                        self.run_id, self.web_chat_provider, self.tab_id,
+                        conversation_url=new_url,
+                    )
+                handoff_parts = [
+                    "The previous provider conversation reached its context limit. "
+                    "This is a continuation of the SAME AgentOS task, not a new task.",
+                    "Original user goal:\\n" + goal[:30_000],
+                    "Continue from the verified task state below. Preserve completed outcomes. "
+                    "Do not repeat or assume any previously executed action; request a new AgentOS "
+                    "tool action only when the remaining work requires it.",
+                ]
+                if system_prompt:
+                    handoff_parts.append("AgentOS durable task state and runtime policy:\\n" + system_prompt[:8_000])
+                recorded_results = [
+                    str(item.get("content") or "")[:5_000]
+                    for item in messages
+                    if isinstance(item, dict) and item.get("web_chat_action_result") is True
+                ][-5:]
+                if not recorded_results and latest_result is not None:
+                    recorded_results = [str(latest_result.get("content") or "")[:5_000]]
+                if recorded_results:
+                    handoff_parts.append(
+                        "Recorded AgentOS execution results (authoritative; most recent last):\\n"
+                        + "\\n\\n".join(recorded_results)
+                    )
+                handoff = build_provider_turn(
+                    "Continue the original task from the saved progress and recorded results. "
+                    "Do not restart completed work.",
+                    context="\\n\\n".join(handoff_parts)[:60_000],
+                )
+                turn = await self.adapter.send_and_wait(
+                    tab_id=self.tab_id, prompt=handoff, expected_provider=self.web_chat_provider,
+                    expected_conversation_url=new_url,
+                )
             resolved_tab_id = getattr(turn, "tab_id", None)
             if resolved_tab_id is not None:
                 self.tab_id = int(resolved_tab_id)
