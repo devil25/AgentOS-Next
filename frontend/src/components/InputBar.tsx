@@ -237,11 +237,12 @@ export function InputBar({
   const selectedModelAvailable = !modelCatalogLoading
     && modelOptions.providers.find((connection) => connection.id === modelSelection.provider)?.available !== false
   const parsedWebChatPageId = Number(webChatPageId)
-  const webChatTarget = webChatProvider && /^\d+$/.test(webChatPageId.trim())
+  const validManualPageId = /^\d+$/.test(webChatPageId.trim())
     && Number.isSafeInteger(parsedWebChatPageId) && parsedWebChatPageId >= 1
-    ? { provider: webChatProvider, pageId: parsedWebChatPageId }
+  const webChatTarget = webChatProvider
+    ? { provider: webChatProvider, ...(validManualPageId ? { pageId: parsedWebChatPageId } : {}) }
     : undefined
-  const reasoningEngineReady = webChatProvider ? Boolean(webChatTarget) : selectedModelAvailable
+  const reasoningEngineReady = webChatProvider ? true : selectedModelAvailable
   const settingsSaving = modelSelectionDisabled || approvalModeDisabled
   const canSteer = Boolean(isStreaming && onSteer && steeringConversationId)
   const canQueue = Boolean(isStreaming && onQueue)
@@ -852,12 +853,12 @@ export function InputBar({
                       step={1}
                       value={webChatPageId}
                       onChange={(event) => setWebChatPageId(event.target.value)}
-                      placeholder="Page ID"
-                      aria-label="Chrome page ID"
+                      placeholder="Auto"
+                      aria-label="Chrome page ID (optional)"
                       disabled={isStreaming || settingsSaving}
                       title={isStreaming
                         ? "The Chrome page is fixed for the active task."
-                        : "Use the positive pageId returned by the AgentOS list_pages browser tool for your signed-in provider tab."}
+                        : "Leave blank to discover the matching signed-in provider tab automatically, or enter a page ID to choose one explicitly."}
                       className="h-7 w-[76px] rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-[11px] text-neutral-200 outline-none focus:border-accent/50"
                     />
                   ) : (
