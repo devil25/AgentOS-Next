@@ -704,7 +704,8 @@ async function inspectEmbeddedAccessibilityMessages() {
       if (!messageRole) continue
       const text = (bodyText || name).replace(/^(?:you said|your message|user message|user|chatgpt said|assistant response|assistant|chatgpt):\\s*/i, '').trim().slice(0, 20000)
       if (!text) continue
-      const identity = String(node.nodeId || '')
+      // Chromium backendDOMNodeId remains stable across accessibility snapshots of the same document, matching the legacy AgentOS snapshot UID strategy.
+      const identity = String(node.backendDOMNodeId || node.nodeId || '')
       if (!identity) continue
       messages.push({ message_id: identity, role: messageRole, text, complete: true })
       if (messages.length >= 100) break
