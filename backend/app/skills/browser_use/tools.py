@@ -735,10 +735,46 @@ def _compact_embedded_conversation_messages(messages: list[Any]) -> tuple[list[d
     return safe_messages, total_count, truncated
 
 
+def _embedded_conversation_reply_ready(payload: dict[str, Any]) -> bool:
+    """A read after submission is ready only when the newest user turn has a reply."""
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    latest_user = -1
+    latest_assistant = -1
+    for index, item in enumerate(messages):
+        if not isinstance(item, dict) or not str(item.get("text") or "").strip():
+            continue
+        role = str(item.get("role") or "").lower()
+        if role == "user":
+            latest_user = index
+        elif role == "assistant":
+            latest_assistant = index
+    if bool(payload.get("generating")):
+        return False
+    if latest_user >= 0:
+        return latest_assistant > latest_user
+    return latest_assistant >= 0 or bool(str(payload.get("pageText") or "").strip())
+
+
 async def embedded_browser_conversation() -> str:
-    """Read only the latest user/assistant exchange from the active embedded chat."""
+    """Wait for and return the latest completed exchange from the active embedded chat.
+
+    A just-submitted user message can appear before its assistant response. Poll
+    briefly inside this single tool call so the agent does not have to issue
+    repeated identical conversation reads while the provider is generating.
+    """
     try:
-        payload = await _embedded_browser_request("/v1/conversation")
+        payload: dict[str, Any] = {}
+        deadline = asyncio.get_running_loop().time() + 30.0
+        while True:
+            payload = await _embedded_browser_request("/v1/conversation")
+            if _embedded_conversation_reply_ready(payload):
+                break
+            if bool(payload.get("loginRequired")) or str(payload.get("blockedReason") or "").strip():
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                break
+            await asyncio.sleep(0.75)
+
         messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
         safe_messages, total_message_count, capture_truncated = _compact_embedded_conversation_messages(messages)
         # The page-text fallback is useful only when semantic assistant extraction
@@ -747,8 +783,9 @@ async def embedded_browser_conversation() -> str:
         page_text = "" if has_assistant else str(payload.get("pageText") or "")[:6000]
         if len(str(payload.get("pageText") or "")) > 6000:
             capture_truncated = True
-        return _json_output({
-            "ok": True,
+        ready = _embedded_conversation_reply_ready(payload)
+        result = {
+            "ok": ready,
             "provider": str(payload.get("provider") or "")[:30],
             "title": str(payload.get("title") or "")[:300],
             "url": str(payload.get("url") or "")[:4096],
@@ -764,7 +801,14 @@ async def embedded_browser_conversation() -> str:
             "generating": bool(payload.get("generating")),
             "loginRequired": bool(payload.get("loginRequired")),
             "blockedReason": str(payload.get("blockedReason") or "")[:300],
-        })
+        }
+        if not ready:
+            result.update({
+                "status": "error",
+                "reason_code": "assistant_response_not_ready",
+                "error": "The latest provider turn did not expose a completed assistant reply within the bounded wait. Do not repeat this read unchanged; report the capture limitation.",
+            })
+        return _json_output(result)
     except Exception as exc:
         return _json_output({
             "ok": False, "status": "error", "reason_code": "embedded_browser_conversation_failed",
