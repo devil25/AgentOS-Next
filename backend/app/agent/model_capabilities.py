@@ -21,6 +21,10 @@ def model_capabilities(client) -> ModelCapabilities:
     provider = client.provider
     model = client.model_name.lower()
     effort = str(getattr(client, "reasoning_effort", "medium"))
+    if provider == "openai_compatible":
+        # Custom endpoints differ on max-token parameters and hidden reasoning.
+        # Keep local budgeting, but do not send a non-portable generation option.
+        return ModelCapabilities(None, 8_192, False)
     if provider == "gemini":
         # Pro's numeric thinking budget has a non-zero provider minimum.
         minimum = 129 if model.startswith("gemini-2.5-pro") else 16

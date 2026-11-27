@@ -122,7 +122,7 @@ describe('useSettingsDraft', () => {
 
   it('preserves a key edited before background credential hydration finishes', async () => {
     const setCredential = vi.fn().mockResolvedValue(undefined)
-    const status = { openai: true, google: false, tavily: false, telegramBot: false }
+    const status = { openai: true, google: false, compatible: false, tavily: false, telegramBot: false }
     window.electronAPI = {
       setCredential, deleteCredential: vi.fn(),
       applyStoredCredentials: vi.fn().mockResolvedValue(status),
@@ -180,7 +180,7 @@ describe('useSettingsDraft', () => {
     // The retry carries the new version, so it is not rejected as stale.
     setCredential.mockResolvedValue({})
     vi.mocked(window.electronAPI!.applyStoredCredentials).mockResolvedValue({
-      openai: true, google: false, tavily: false, telegramBot: false,
+      openai: true, google: false, compatible: false, tavily: false, telegramBot: false,
     })
     mocks.updateSettings.mockResolvedValue(buildSettings({ settings_version: 'v3', telegram_allowed_chat_ids: '-100' }))
     await act(async () => { outcome = await result.current.save(FALLBACK_MODEL_OPTIONS) })

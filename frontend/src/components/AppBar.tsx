@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Copy, Minus, PanelLeftClose, PanelLeftOpen, ShieldAlert, ShieldCheck, ShieldHalf, Square, X } from 'lucide-react'
 import type { AgentSettings } from '../lib/api/types'
 import { resolveAgentName } from '../lib/identity'
-import appLogo from '../assets/Logo.png'
+import appLogo from '../assets/agentos-mark.svg'
 import type { ItemActionFeedback } from '../hooks/useItemActions'
 
 type ApprovalMode = AgentSettings['permissions']['mode']
@@ -44,7 +44,7 @@ function platformClass(): string {
   return ''
 }
 
-// Windows and Linux get Monaw-styled window buttons; macOS keeps its traffic lights.
+// Windows and Linux get AgentOS-styled window buttons; macOS keeps its traffic lights.
 function WindowControls() {
   const api = typeof window !== 'undefined' ? window.electronAPI : undefined
   const [maximized, setMaximized] = useState(false)
@@ -141,7 +141,7 @@ export function AppBar({
         ) : (
           <>
             <div className="app-bar-wordmark">
-              <img src={appLogo} alt="Monaw logo" className="h-6 w-6 shrink-0 object-contain" draggable={false} />
+              <img src={appLogo} alt="AgentOS-Next logo" className="h-6 w-6 shrink-0 object-contain" draggable={false} />
               <span className="truncate">{resolveAgentName(agentName)}</span>
             </div>
             <button

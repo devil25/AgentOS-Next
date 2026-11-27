@@ -462,6 +462,7 @@ def test_resume_dispatches_a_real_worker_and_finalizes_the_new_attempt(
         durable_run,
         attachments,
         settings,
+        reasoning_client=None,
     ):
         observed.append(
             {
@@ -477,6 +478,7 @@ def test_resume_dispatches_a_real_worker_and_finalizes_the_new_attempt(
                 "attachments": attachments,
                 "steering": steering,
                 "settings": settings,
+                "reasoning_client": reasoning_client,
             }
         )
         context["db"].persist_turn_messages(
@@ -539,6 +541,7 @@ def test_resume_dispatches_a_real_worker_and_finalizes_the_new_attempt(
     assert observed[0]["execution_source"] == "desktop"
     assert observed[0]["is_continuation"] is True
     assert observed[0]["attempt"] == int(paused["attempt"]) + 1
+    assert observed[0]["reasoning_client"] is None
     current = context["journal"].snapshot(context["run"].run_id)
     assert current["status"] == "completed"
     assert current["attempt"] == int(paused["attempt"]) + 1

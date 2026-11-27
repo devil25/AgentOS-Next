@@ -7,6 +7,7 @@ from app.skills.browser_use.extension.keys import key_events, parse_key_combo
 from app.skills.browser_use.extension.dom_inspection import ACTION_TARGET, READ_ELEMENT
 from app.skills.browser_use.extension.session import ToolError
 from app.skills.browser_use.extension.toolset import BrowserTools, _TARGET_FACTS
+from app.skills.browser_use.extension.web_chat_inspection import WEB_CHAT_INSPECTION
 from app.skills.browser_use.extension.page_state import PAGE_STATE
 from app.skills.browser_use.extension.form_policy import _INSTALL
 from app.skills.browser_use.extension.tools_schema import TOOL_DEFINITIONS, TOOL_NAMES
@@ -95,6 +96,12 @@ class FakeChrome:
             function = args["functionDeclaration"]
             if "el.ownerDocument.activeElement === el" in function:
                 return {"result":{"value":True}}
+            if function == WEB_CHAT_INSPECTION:
+                return {"result":{"value":{
+                    "url":self.tabs[0]["url"],"title":"ChatGPT","provider":"chatgpt",
+                    "messages":[{"message_id":"assistant-1","text":"Ready","complete":True,"role":"assistant"}],
+                    "composerReady":True,"generating":False,"loginRequired":False,"blockedReason":""
+                }}}
             if function == _TARGET_FACTS:
                 return {"result":{"value":{"tag":"input", "type":"text", "attached":True, "frame_url":self.tabs[0]["url"]}}}
             if function in {READ_ELEMENT, ACTION_TARGET}:
@@ -173,6 +180,24 @@ def test_tool_names_are_a_subset_of_the_policy_table():
         assert "filePath" not in properties and "initScript" not in properties
     upload = next(tool for tool in TOOL_DEFINITIONS if tool["name"] == "upload_file")
     assert "filePaths" in upload["inputSchema"]["required"]
+
+
+def test_inspect_web_chat_uses_fixed_read_only_script_and_returns_provider_metadata():
+    tools, chrome = _tools()
+    chrome.tabs[0]["url"] = "https://chatgpt.com/c/test"
+    output = _run(tools, "inspect_web_chat")
+    payload = json.loads(output.lines[0])
+    assert payload["provider"] == "chatgpt"
+    assert payload["messages"] == [
+        {"message_id":"assistant-1","text":"Ready","complete":True,"role":"assistant"}
+    ]
+    assert payload["composerReady"] is True
+    calls = [(method,args) for method,args in chrome.calls if method == "Runtime.callFunctionOn"]
+    assert len(calls) == 1
+    assert calls[0][1]["functionDeclaration"] == WEB_CHAT_INSPECTION
+    assert "fetch(" not in WEB_CHAT_INSPECTION
+    assert "localStorage" not in WEB_CHAT_INSPECTION
+    assert "cookie" not in WEB_CHAT_INSPECTION.lower()
 
 
 def test_list_pages_uses_stable_page_ids():

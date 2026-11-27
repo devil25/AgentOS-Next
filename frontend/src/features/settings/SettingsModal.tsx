@@ -35,7 +35,9 @@ import { useSettingsDraft } from './useSettingsDraft'
 import { useDiscardPrompt } from '../../hooks/useDiscardPrompt'
 import { useModalFocus } from '../../hooks/useModalFocus'
 import {
+  COMPATIBLE_API_PRESETS,
   DEFAULT_CONNECTION_PORTAL,
+  type CompatibleApiPresetId,
   type ConnectionPortalId,
   type ConnectionSecretStatuses,
 } from './connectionPortals/connectionPortalConfig'
@@ -659,6 +661,7 @@ export function SettingsModal({
   const connectionSecretStatuses: ConnectionSecretStatuses = {
     openai: draft.api_keys.has_openai_key,
     google: draft.api_keys.has_google_key,
+    compatible: draft.api_keys.has_compatible_key,
     tavily: draft.api_keys.has_tavily_key,
     telegramBot: Boolean(draft.api_keys.has_telegram_bot_token),
   }
@@ -969,6 +972,66 @@ export function SettingsModal({
                           onPortalChange={setActiveConnectionPortal}
                           onSecretChange={updateConnectionSecret}
                           onToggleSecrets={() => setShowKey((value) => !value)}
+                          compatibleBaseUrl={draft.llm.compatible_base_url}
+                          onCompatibleBaseUrlChange={(value) => updateDraft((current) => {
+                            const modelName = current.llm.provider === 'openai_compatible'
+                              ? current.llm.model_name
+                              : current.llm.custom_models?.openai_compatible?.[0] ?? 'your-model-id'
+                            return {
+                              ...current,
+                              llm: {
+                                ...current.llm,
+                                provider: 'openai_compatible',
+                                model_name: modelName,
+                                compatible_base_url: value,
+                              },
+                            }
+                          })}
+                          compatibleModelName={draft.llm.model_name}
+                          onCompatibleModelNameChange={(value) => updateDraft((current) => ({
+                            ...current,
+                            llm: {
+                              ...current.llm,
+                              provider: 'openai_compatible',
+                              model_name: value,
+                            },
+                          }))}
+                          onCompatibleModelNameCommit={(value) => updateDraft((current) => {
+                            const modelName = value.trim()
+                            if (!modelName) return current
+                            const models = current.llm.custom_models?.openai_compatible ?? []
+                            if (models.includes(modelName)) return current
+                            return {
+                              ...current,
+                              llm: {
+                                ...current.llm,
+                                custom_models: {
+                                  ...current.llm.custom_models,
+                                  openai_compatible: [...models, modelName].slice(-20),
+                                },
+                              },
+                            }
+                          })}
+                          onCompatiblePresetChange={(preset: CompatibleApiPresetId) => updateDraft((current) => {
+                            const selected = COMPATIBLE_API_PRESETS[preset]
+                            const modelName = preset === 'custom'
+                              ? current.llm.custom_models?.openai_compatible?.[0] ?? selected.modelName
+                              : selected.modelName
+                            const existingModels = current.llm.custom_models?.openai_compatible ?? []
+                            const models = preset === 'custom' || !modelName
+                              ? existingModels
+                              : [...new Set([...existingModels, modelName])]
+                            return {
+                              ...current,
+                              llm: {
+                                ...current.llm,
+                                provider: 'openai_compatible',
+                                model_name: modelName,
+                                compatible_base_url: selected.baseUrl,
+                                custom_models: { ...current.llm.custom_models, openai_compatible: models },
+                              },
+                            }
+                          })}
                         />
                       </div>
                     </SettingsCard>
@@ -1026,7 +1089,12 @@ export function SettingsModal({
                             label={providerLabel(provider, modelOptions)}
                             hint={fromAccount
                               ? `${catalog.models.length - (draft.llm.custom_models?.codex?.length ?? 0)} models loaded from your ChatGPT account.`
-                              : provider === 'codex' ? 'Sign in to load the models your ChatGPT plan offers.' : ''}
+                              : provider === 'codex' ? 'Sign in to load the models your ChatGPT plan offers.'
+                                : provider === 'openai_compatible'
+                                  ? catalog.source === 'endpoint'
+                                    ? 'Endpoint models detected. You can still add extra model IDs below as a fallback.'
+                                    : 'Models are discovered automatically when the endpoint exposes /models. Add IDs here only as a manual fallback.'
+                                  : ''}
                             names={draft.llm.custom_models?.[provider] ?? []}
                             onChange={(names) => updateDraft((current) => ({
                               ...current,

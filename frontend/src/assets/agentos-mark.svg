@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">AgentOS-Next</title>
+  <defs>
+    <linearGradient id="surface" x1="12" y1="8" x2="116" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#172554"/>
+      <stop offset="1" stop-color="#101827"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="28" y1="96" x2="98" y2="25" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset=".55" stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#surface)"/>
+  <path d="M26 91 57 30a8 8 0 0 1 14 0l31 61H83L64 53 45 91H26Z" fill="url(#mark)"/>
+  <path d="M49 78h30" stroke="#E0F2FE" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="99" cy="29" r="7" fill="#67E8F9"/>
+  <path d="M91 36 82 45" stroke="#67E8F9" stroke-width="3" stroke-linecap="round"/>
+</svg>

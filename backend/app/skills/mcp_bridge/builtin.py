@@ -56,6 +56,7 @@ BUILTIN_TOOL_POLICIES: dict[str, dict[str, BuiltinToolPolicy]] = {
         "select_page": _read(),
         "take_snapshot": _read(),
         "inspect_element": _read(),
+        "inspect_web_chat": _read("builtin_web_chat_read"),
         "take_screenshot": _read(),
         "wait_for": _read(),
         "list_console_messages": _read(),

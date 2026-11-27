@@ -553,7 +553,9 @@ def _start_resume_worker(durable_run: Any, resume_input: dict[str, Any]) -> None
     async def drive() -> None:
         try:
             from app.agent.runtime import CONTINUATION_PROMPT, run_agent_stream
+            from app.agent.web_chat.session_store import restore_web_chat_reasoning_client
 
+            reasoning_client = restore_web_chat_reasoning_client(run_id)
             async for event in run_agent_stream(
                 message=CONTINUATION_PROMPT,
                 conversation_id=scope["conversation_id"],
@@ -566,6 +568,7 @@ def _start_resume_worker(durable_run: Any, resume_input: dict[str, Any]) -> None
                 interactive=True,
                 steering=inbox,
                 durable_run=durable_run,
+                reasoning_client=reasoning_client,
             ):
                 event_name = str(event.get("event") or "message")
                 if event_name == "done":

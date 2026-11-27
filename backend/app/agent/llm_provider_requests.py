@@ -363,6 +363,71 @@ def gemini_request_payload(
     return contents, config
 
 
+def openai_chat_completions_kwargs(
+    *,
+    model_name: str,
+    messages: list[dict],
+    tools: list[dict],
+    system_prompt: str,
+    tool_choice: str | dict | None = None,
+    include_images: bool = False,
+) -> dict:
+    """Build the portable Chat Completions subset used by compatible endpoints."""
+    normalized: list[dict] = []
+    if system_prompt:
+        normalized.append({"role": "system", "content": system_prompt})
+    for message in messages:
+        role = str(message.get("role") or "user")
+        if role in {"human"}:
+            role = "user"
+        elif role == "model":
+            role = "assistant"
+        if role not in {"system", "user", "assistant", "tool"}:
+            continue
+        content = message.get("content")
+        image_payloads = image_payloads_for_message(message, include_images and role in {"user", "tool"})
+        if image_payloads:
+            content_parts: list[dict] = [{"type": "text", "text": str(content)}] if content else []
+            content_parts.extend({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{payload['mime_type']};base64,{base64.b64encode(payload['data']).decode('ascii')}",
+                },
+            } for payload in image_payloads)
+            content = content_parts
+        item = {"role": role, "content": content}
+        if role == "assistant" and isinstance(message.get("tool_calls"), list):
+            item["tool_calls"] = message["tool_calls"]
+        if role == "tool":
+            item["tool_call_id"] = str(message.get("tool_call_id") or "")
+            if message.get("name"):
+                item["name"] = str(message["name"])
+        normalized.append(item)
+
+    kwargs: dict[str, Any] = {"model": model_name, "messages": normalized}
+    if tools:
+        kwargs["tools"] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": str(tool["name"]),
+                    "description": str(tool.get("description") or ""),
+                    "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
+                },
+            }
+            for tool in tools
+        ]
+        if isinstance(tool_choice, dict):
+            kwargs["tool_choice"] = tool_choice
+        elif tool_choice in {"required", "any"}:
+            kwargs["tool_choice"] = "required"
+        elif tool_choice == "none":
+            kwargs["tool_choice"] = "none"
+        else:
+            kwargs["tool_choice"] = "auto"
+    return kwargs
+
+
 def openai_responses_kwargs(
     *,
     model_name: str,

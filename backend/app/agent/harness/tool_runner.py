@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Callable
 
@@ -29,6 +30,7 @@ from app.agent.memory_manager import MemoryManager
 from app.agent.state import ExecutionPlan, PlanStep
 from app.agent.steering import SteeringInbox
 from app.agent.tool_registry import ToolRegistry, can_parallelize
+from app.agent.explicit_tool_scope import ExplicitToolScopeGuard, filter_tool_calls
 from app.agent.tool_observations import (
     DEVTOOLS_PREFIX, DEVTOOLS_STEP_DESCRIPTIONS, compact_tool_observation, extract_image_attachments,
     is_devtools_tool, tool_error_code,
@@ -60,9 +62,14 @@ class ToolBatchRunner:
         transcript: TurnTranscript, lifecycle: TurnLifecycle, observer: TurnObserver,
         steering: SteeringInbox | None, user_request: Callable[[], str], progress: Callable[[], str],
         max_parallel: int, max_identical_calls: int, stuck_rounds_limit: int, guard_blocks_limit: int,
+        review_client: LLMClient | None = None,
     ) -> None:
         self.registry, self.executor, self.execution_gate = registry, executor, execution_gate
         self.memory, self.llm_client, self.budget = memory, client, budget
+        # Reasoning may come from a signed-in web-chat UI, but security reviews
+        # must stay on the configured native client rather than creating hidden
+        # extra turns in the user's provider conversation.
+        self.review_client = review_client or client
         self.transcript, self.lifecycle, self.observer = transcript, lifecycle, observer
         self.conversation_id = lifecycle.conversation_id
         self.emit = lifecycle.publisher.publish_nowait
@@ -84,6 +91,7 @@ class ToolBatchRunner:
         self._execution_plan: ExecutionPlan | None = None
         self._sync_plan_progress = getattr(memory, "sync_plan_progress", None)
         self.task_progress = None
+        self._explicit_tool_scope_guard = ExplicitToolScopeGuard()
 
     def initialize_review_history(self) -> None:
         build = getattr(self.memory, "build_approval_review_context", None)
@@ -269,7 +277,7 @@ class ToolBatchRunner:
                     budget=self.budget,
                     execute_tool=_rerun_after_grant,
                     emit=lambda event: self._emit_gate_event(event, prepared.active_key),
-                    review_client=self.llm_client,
+                    review_client=self.review_client,
                     user_request=self.user_request(),
                     review_context={**self.review_history, "progress": self.progress(),
                                     "tool_evidence": self.history},
@@ -340,7 +348,10 @@ class ToolBatchRunner:
         )
 
 
-    async def _process_tool_result(self, prepared: PreparedToolCall, tool_result: ToolCallResult, *, guarded: GuardedToolResult | None = None) -> None:
+    async def _process_tool_result(
+        self, prepared: PreparedToolCall, tool_result: ToolCallResult, *,
+        guarded: GuardedToolResult | None = None, internal_transport: bool = False,
+    ) -> ToolCallResult:
         """Apply the ordered result guards and publish the call's final result."""
 
         call_id = str(prepared.call_id)
@@ -352,7 +363,7 @@ class ToolBatchRunner:
         status = "ok" if tool_result.status == "ok" else "error"
         tool_output = tool_result.output
 
-        if self.task_progress is not None and prepared.tool_name != "task_plan":
+        if self.task_progress is not None and prepared.tool_name != "task_plan" and not internal_transport:
             evidence = self.task_progress.record(prepared, tool_result, self.lifecycle.durable_run)
             payload = tool_result.normalized_output
             tool_output = json.dumps({**payload, "task_evidence": evidence} if payload is not None else {
@@ -432,12 +443,78 @@ class ToolBatchRunner:
             }
         )
         self.ledger.finish(prepared.active_key)
-        self.transcript.add_tool_result(tool_result, images=image_attachments)
-        if recovery_prompt:
-            self.transcript.append({"role": "user", "content": recovery_prompt})
-        workflow_hint = self.browser_workflow.observe(tool_name, arguments, raw_tool_output, status)
-        if workflow_hint and not recovery_prompt:
-            self.transcript.append({"role": "user", "content": workflow_hint})
+        if not internal_transport:
+            self.transcript.add_tool_result(tool_result, images=image_attachments)
+            if recovery_prompt:
+                self.transcript.append({"role": "user", "content": recovery_prompt})
+            workflow_hint = self.browser_workflow.observe(tool_name, arguments, raw_tool_output, status)
+            if workflow_hint and not recovery_prompt:
+                self.transcript.append({"role": "user", "content": workflow_hint})
+        return tool_result
+
+
+    async def execute_transport_tool(self, tool_name: str, arguments: dict) -> dict:
+        """Execute one internal browser-transport call through this active turn's gates.
+
+        These calls are transport plumbing for a web-chat reasoning client. They
+        still use registry validation, ToolPolicy, ToolExecutor, the execution
+        gate, durable operation journaling, observability, and the tool ledger.
+        They do not create a second turn or bypass the active runtime.
+        """
+        if self.lifecycle.review_requested or self.lifecycle.pause_requested or self.pause is not None:
+            return {
+                "content": [{"type": "text", "text": "The active AgentOS run is paused or awaiting review."}],
+                "isError": True,
+            }
+        if not isinstance(tool_name, str) or not tool_name.strip() or not isinstance(arguments, dict):
+            return {"content": [{"type": "text", "text": "Invalid browser transport tool request."}], "isError": True}
+
+        # Internal web-chat transport is a second dispatch path. Apply the same
+        # latched user allowlist here before registry lookup or tool journaling.
+        scope = self._explicit_tool_scope_guard.resolve(self.user_request())
+        if scope is not None and not scope.allows(tool_name):
+            message = (
+                f"Blocked browser transport tool '{tool_name}': this turn explicitly "
+                f"allows only '{scope.allowed_tool}'. No tool was dispatched."
+            )
+            return {
+                "content": [{"type": "text", "text": json.dumps({
+                    "status": "blocked",
+                    "reason_code": "explicit_tool_scope_enforced",
+                    "error": message,
+                })}],
+                "isError": True,
+            }
+
+        call_id = "webchat-transport-" + uuid.uuid4().hex
+        prepared = self._prepare(
+            {"call_id": call_id, "name": tool_name, "arguments": dict(arguments)},
+            {},
+        )
+        if prepared.rejection is not None or not prepared.policy_decision.allowed:
+            guarded = prepared.rejection or self.recovery.policy_blocked(
+                tool_name=prepared.tool_name,
+                arguments=prepared.arguments,
+                call_id=prepared.call_id,
+                policy_decision=prepared.policy_decision,
+            )
+            self._start(prepared)
+            result = ToolCallResult.from_output(
+                call_id=call_id,
+                name=prepared.tool_name,
+                output=guarded.output,
+                fallback_status="error",
+            )
+            final_result = await self._process_tool_result(prepared, result, guarded=guarded, internal_transport=True)
+        else:
+            self._start(prepared)
+            result = await self._invoke_prepared_tool(prepared)
+            final_result = await self._process_tool_result(prepared, result, internal_transport=True)
+
+        return {
+            "content": [{"type": "text", "text": final_result.output}],
+            "isError": final_result.status != "ok",
+        }
 
 
     async def _flush_prepared_tool_calls(self, prepared_calls: list[PreparedToolCall]) -> None:
@@ -522,11 +599,25 @@ class ToolBatchRunner:
             self.pause = TurnOutcome(summary="", status="paused", reason_code="user_pause")
             return BatchOutcome(self.pause)
         self.recovery.begin_round()
-        self._execution_plan = self._build_execution_plan(self.user_request(), calls)
+        request_text = self.user_request()
+        scope = self._explicit_tool_scope_guard.resolve(request_text)
+        scoped_calls = list(calls)
+        blocked_by_scope: list[str] = []
+        if scope is not None:
+            scoped_calls, blocked_by_scope = filter_tool_calls(scope, calls)
+            if not scoped_calls:
+                summary = (
+                    f"Explicit tool restriction allowed only `{scope.allowed_tool}`. "
+                    f"No requested tool matched; blocked without dispatch: {', '.join(blocked_by_scope)}."
+                )
+                self.pause = TurnOutcome(summary=summary, status="paused", reason_code="explicit_tool_scope_enforced")
+                self.emit({"event": "progress", "data": {"content": summary}})
+                return BatchOutcome(self.pause)
+        self._execution_plan = self._build_execution_plan(request_text, scoped_calls)
         steps = {step.step_id: step for step in self._execution_plan.steps}
         self.emit({"event": "plan", "data": self._execution_plan.to_dict()})
         self._sync_plan()
-        for batch in can_parallelize(calls, self.registry.get_tool):
+        for batch in can_parallelize(scoped_calls, self.registry.get_tool):
             if self.lifecycle.review_requested:
                 self.pause = TurnOutcome(
                     summary="",
@@ -574,7 +665,19 @@ class ToolBatchRunner:
                 break
             if self.pause is not None:
                 break
-        self.pause = self.pause or self.recovery.finish_round(len(calls))
+        self.pause = self.pause or self.recovery.finish_round(len(scoped_calls))
+        if blocked_by_scope and self.pause is None:
+            summary = (
+                f"Explicit tool restriction enforced: executed only `{scope.allowed_tool}`; "
+                f"blocked additional tool call(s) before dispatch: {', '.join(blocked_by_scope)}. "
+                "The turn stopped without invoking any other tool."
+            )
+            self.pause = TurnOutcome(
+                summary=summary,
+                status="paused",
+                reason_code="explicit_tool_scope_enforced",
+            )
+            self.emit({"event": "progress", "data": {"content": summary}})
         if self.recovery.round_hint and self.pause is None:
             self.transcript.append({"role": "user", "content": self.recovery.round_hint})
             self.emit({"event": "progress", "data": {"content": "The recent results are unchanged; checking another approach."}})

@@ -83,7 +83,7 @@ export interface ScheduledTask {
   telegramChatId: string
   reuseConversation: boolean
   workspaceDir?: string
-  modelProvider?: '' | 'openai' | 'gemini' | 'codex'
+  modelProvider?: '' | 'openai' | 'gemini' | 'codex' | 'openai_compatible'
   modelName?: string
   modelReasoningEffort?: string
   lastRunAt: string
@@ -124,7 +124,7 @@ export interface ScheduledTaskInput {
   telegramChatId?: string
   reuseConversation?: boolean
   workspaceDir?: string
-  modelProvider?: '' | 'openai' | 'gemini' | 'codex'
+  modelProvider?: '' | 'openai' | 'gemini' | 'codex' | 'openai_compatible'
   modelName?: string
   modelReasoningEffort?: string
 }
@@ -162,6 +162,13 @@ export interface ContextUsage {
     count: number
   }[]
   notes: string
+}
+
+export type WebChatProvider = 'chatgpt' | 'gemini' | 'deepseek' | 'zai'
+
+export interface WebChatTarget {
+  provider: WebChatProvider
+  pageId?: number
 }
 
 export interface UploadedAttachment {
@@ -574,8 +581,9 @@ export interface DataDeletionResult {
 export interface AgentSettings {
   permissions_config_path?: string
   llm: {
-    provider: 'openai' | 'gemini' | 'codex'
+    provider: 'openai' | 'gemini' | 'codex' | 'openai_compatible'
     model_name: string
+    compatible_base_url: string
     reasoning_effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
     max_iterations_per_turn: number
     max_turn_seconds: number
@@ -583,7 +591,7 @@ export interface AgentSettings {
     /** Model tokens one chat message may use before the task pauses; 0 is no limit. */
     max_tokens_per_turn: number
     /** Model names the user added, by provider. */
-    custom_models?: Partial<Record<'openai' | 'gemini' | 'codex', string[]>>
+    custom_models?: Partial<Record<'openai' | 'gemini' | 'codex' | 'openai_compatible', string[]>>
   }
   speech_to_text: {
     provider: SpeechToTextProvider
@@ -666,6 +674,7 @@ export interface AgentSettings {
   api_keys: {
     has_openai_key: boolean
     has_google_key: boolean
+    has_compatible_key: boolean
     has_tavily_key: boolean
     has_telegram_bot_token: boolean
     has_telegram_allowlist: boolean
@@ -687,7 +696,7 @@ export interface ModelOptions {
     labels?: Record<string, string>
     /** Supported reasoning levels by model, where the provider lists them. */
     reasoning_efforts?: Record<string, Array<AgentSettings['llm']['reasoning_effort']>>
-    /** "account" when the list came from the signed-in ChatGPT account. */
+    /** "account" for ChatGPT, "endpoint" for discovered compatible API models. */
     source?: string
   }>
 }
@@ -751,6 +760,7 @@ export interface SettingsUpdatePayload {
   execution_detail?: AgentSettings['execution_detail']
   openai_api_key?: string
   google_api_key?: string
+  compatible_api_key?: string
   tavily_api_key?: string
   telegram_bot_token?: string
   telegram_allowed_user_ids?: string

@@ -156,6 +156,305 @@ def test_llm_client_public_chat_routes_through_provider_adapter(monkeypatch):
     assert adapter.calls[0][4] == "required"
 
 
+def test_compatible_endpoint_selects_chat_completions_adapter_and_base_url(monkeypatch):
+    """The custom protocol must not accidentally route through Responses API."""
+    from app.agent.llm_provider_adapters import OpenAIChatCompletionsProviderAdapter
+
+    client = LLMClient(
+        provider="openai_compatible",
+        model_name="deepseek-chat",
+        api_key="compatible-key",
+        base_url="https://api.example.test/v1",
+    )
+    assert isinstance(client.provider_adapter, OpenAIChatCompletionsProviderAdapter)
+    assert str(client._openai_client.base_url) == "https://api.example.test/v1/"
+
+
+def test_deepseek_flash_uses_documented_thinking_and_vision_contract(tmp_path):
+    captured = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content="ready", tool_calls=[]))],
+                usage=None,
+            )
+
+    image_path = tmp_path / "sample.png"
+    image_path.write_bytes(b"fake-png-bytes")
+    client = LLMClient(
+        provider="openai_compatible",
+        model_name="deepseek-flash",
+        api_key="key",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="medium",
+    )
+    assert client.supports_vision is True
+    client._openai_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    response = asyncio.run(client._openai_chat_completions(
+        [{"role": "user", "content": "Describe this image", "images": [{"path": str(image_path)}]}],
+        [{"name": "inspect", "description": "Inspect", "parameters": {"type": "object", "properties": {}}}],
+        "",
+        None,
+        "required",
+    ))
+
+    assert response.content == "ready"
+    assert captured["extra_body"] == {
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "high",
+    }
+    assert captured["tool_choice"] == "auto"
+    assert captured["messages"][0]["content"][1]["type"] == "image_url"
+    assert captured["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_deepseek_none_effort_disables_thinking_and_keeps_required_tool_choice():
+    captured = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content="ready", tool_calls=[]))],
+                usage=None,
+            )
+
+    client = LLMClient(
+        provider="openai_compatible",
+        model_name="deepseek-v4-pro",
+        api_key="key",
+        base_url="https://api.deepseek.com",
+        reasoning_effort="none",
+    )
+    assert client.supports_vision is False
+    client._openai_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    asyncio.run(client._openai_chat_completions(
+        [{"role": "user", "content": "Run a tool"}],
+        [{"name": "inspect", "description": "Inspect", "parameters": {"type": "object", "properties": {}}}],
+        "",
+        None,
+        "required",
+    ))
+
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert captured["tool_choice"] == "required"
+
+
+def test_zai_glm_53_keeps_required_thinking_and_uses_auto_tool_choice():
+    captured = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content="ready", tool_calls=[]))],
+                usage=None,
+            )
+
+    client = LLMClient(
+        provider="openai_compatible",
+        model_name="glm-5.3",
+        api_key="key",
+        base_url="https://api.z.ai/api/paas/v4",
+        reasoning_effort="none",
+    )
+    client._openai_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    asyncio.run(client._openai_chat_completions(
+        [{"role": "user", "content": "Use a tool"}],
+        [{"name": "inspect", "description": "Inspect", "parameters": {"type": "object", "properties": {}}}],
+        "",
+        None,
+        "required",
+    ))
+
+    assert captured["extra_body"] == {
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "low",
+    }
+    assert captured["tool_choice"] == "auto"
+
+
+def test_zai_glm_46_can_disable_thinking_but_still_uses_auto_tool_choice():
+    captured = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content="ready", tool_calls=[]))],
+                usage=None,
+            )
+
+    client = LLMClient(
+        provider="openai_compatible",
+        model_name="glm-4.6",
+        api_key="key",
+        base_url="https://api.z.ai/api/paas/v4",
+        reasoning_effort="none",
+    )
+    client._openai_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    asyncio.run(client._openai_chat_completions(
+        [{"role": "user", "content": "Answer"}], [], "", None,
+    ))
+
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "tool_choice" not in captured
+
+
+def test_compatible_chat_completion_parses_tool_calls_and_native_history():
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            self.kwargs = kwargs
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    finish_reason="tool_calls",
+                    message=SimpleNamespace(
+                        content="",
+                        reasoning_content="private reasoning",
+                        tool_calls=[SimpleNamespace(
+                            id="call_compatible_1",
+                            function=SimpleNamespace(name="inspect", arguments='{"path":"README.md"}'),
+                        )],
+                    ),
+                )],
+                usage=SimpleNamespace(prompt_tokens=12, completion_tokens=5, total_tokens=17),
+            )
+
+    completions = FakeCompletions()
+    client = LLMClient(
+        provider="openai_compatible",
+        model_name="custom-model",
+        api_key="key",
+        base_url="https://api.example.test/v1",
+    )
+    client._openai_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    response = asyncio.run(client._openai_chat_completions(
+        [{"role": "user", "content": "Inspect README"}],
+        [{"name": "inspect", "description": "Inspect", "parameters": {"type": "object", "properties": {}}}],
+        "system rules",
+        None,
+        "required",
+    ))
+
+    assert completions.kwargs["messages"][0] == {"role": "system", "content": "system rules"}
+    assert completions.kwargs["tool_choice"] == "required"
+    assert completions.kwargs["tools"][0]["function"]["name"] == "inspect"
+    assert response.finish_reason == "tool_calls"
+    assert response.tool_calls[0].arguments == {"path": "README.md"}
+    assert response.reasoning_content == "private reasoning"
+    assert response.provider_messages[0]["tool_calls"][0]["id"] == "call_compatible_1"
+    assert response.usage.total_tokens == 17
+
+
+def test_compatible_stream_accumulates_function_arguments_before_accepting_tools():
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            assert kwargs["stream"] is True
+            chunks = [
+                SimpleNamespace(choices=[SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content="checking ",
+                        tool_calls=[SimpleNamespace(
+                            index=0, id="call_stream_1",
+                            function=SimpleNamespace(name="inspect", arguments='{"path":'),
+                        )],
+                    ), finish_reason=None)]),
+                SimpleNamespace(choices=[SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content="the tool",
+                        tool_calls=[SimpleNamespace(
+                            index=0, id=None,
+                            function=SimpleNamespace(name=None, arguments='"README.md"}'),
+                        )],
+                    ), finish_reason=None)]),
+                SimpleNamespace(choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content=None, reasoning_content=None, tool_calls=[]),
+                    finish_reason="tool_calls")]),
+            ]
+
+            class Stream:
+                def __aiter__(self):
+                    self.index = 0
+                    return self
+
+                async def __anext__(self):
+                    if self.index >= len(chunks):
+                        raise StopAsyncIteration
+                    value = chunks[self.index]
+                    self.index += 1
+                    return value
+
+            return Stream()
+
+    client = LLMClient(
+        provider="openai_compatible",
+        model_name="custom-model",
+        api_key="key",
+        base_url="https://api.example.test/v1",
+    )
+    client._openai_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    reasoning_deltas = []
+
+    async def on_reasoning(delta):
+        reasoning_deltas.append(delta)
+
+    response = asyncio.run(client._openai_chat_completions(
+        [{"role": "user", "content": "Inspect README"}],
+        [],
+        "",
+        None,
+        reasoning_callback=on_reasoning,
+    ))
+
+    assert response.finish_reason == "tool_calls"
+    assert response.reasoning_content == "checking the tool"
+    assert reasoning_deltas == ["checking ", "the tool"]
+    assert response.tool_calls[0].arguments == {"path": "README.md"}
+    assert response.provider_messages[0]["tool_calls"][0]["function"]["arguments"] == '{"path":"README.md"}'
+
+
+def test_compatible_stream_without_terminal_reason_does_not_accept_tools():
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            chunks = [SimpleNamespace(choices=[SimpleNamespace(
+                delta=SimpleNamespace(content=None, tool_calls=[]), finish_reason=None,
+            )])]
+            class Stream:
+                def __aiter__(self):
+                    self.used = False
+                    return self
+                async def __anext__(self):
+                    if self.used:
+                        raise StopAsyncIteration
+                    self.used = True
+                    return chunks[0]
+            return Stream()
+
+    client = LLMClient(
+        provider="openai_compatible", model_name="custom-model", api_key="key",
+        base_url="https://api.example.test/v1",
+    )
+    client._openai_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    async def on_delta(_text):
+        return None
+    with pytest.raises(ResponseInterruptedError, match="without a completion reason"):
+        asyncio.run(client._openai_chat_completions([], [], "", on_delta))
+
+
+def test_compatible_tool_result_uses_chat_completions_tool_message():
+    result = ToolCallResult(call_id="call-1", name="inspect", output='{"ok":true}', status="ok")
+    assert build_tool_result_message(result, provider="openai_compatible") == {
+        "role": "tool",
+        "tool_call_id": "call-1",
+        "name": "inspect",
+        "content": '{"ok":true}',
+    }
+
+
 def test_llm_client_selects_provider_adapter(monkeypatch):
     class FakeAsyncOpenAI:
         def __init__(self, **_kwargs):

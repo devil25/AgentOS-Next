@@ -173,6 +173,7 @@ async def run_job(
     principal_id: str = "",
     permission_profile_id: str = "",
     interactive: bool = True,
+    reasoning_client=None,
 ) -> None:
     """Run the agent loop for a job, feeding all events into the job's ring buffer."""
     from app.agent.runtime import run_agent_stream
@@ -190,6 +191,7 @@ async def run_job(
                 permission_profile_id=permission_profile_id,
                 interactive=interactive,
                 durable_run_id=job.job_id,
+                reasoning_client=reasoning_client,
             ):
                 await job.append_event(event)
                 if event.get("event") == "done":

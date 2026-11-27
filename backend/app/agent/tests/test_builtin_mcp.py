@@ -25,6 +25,31 @@ def _runtime(settings_data: AgentSettings):
     return build_runtime_namespace(base, settings_data)
 
 
+
+@pytest.mark.parametrize("response", [
+    {
+        "ok": True,
+        "is_error": True,
+        "content": [{"type": "text", "text": "Chrome is open but the Monaw extension has not connected."}],
+    },
+    {
+        "ok": False,
+        "status": "error",
+        "error": {"code": "mcp_disconnected", "message": "The MCP server is not connected."},
+    },
+])
+def test_browser_context_preserves_actionable_extension_connection_error(response):
+    from app.skills.mcp_bridge.registry import _browser_context
+
+    class Manager:
+        def call_tool_sync(self, _name, _arguments):
+            return json.dumps(response)
+
+    expected = "Chrome is open but the Monaw extension has not connected." if response.get("is_error") else "The MCP server is not connected."
+    with pytest.raises(ValueError, match=expected):
+        _browser_context(Manager(), "list_pages", {})
+
+
 def test_browser_server_ships_as_a_builtin_served_by_the_extension(monkeypatch):
     import sys
 
@@ -143,15 +168,26 @@ def test_policy_table_covers_exactly_the_extension_tools():
 
 def test_devtools_reads_never_prompt_and_are_observations(runtime_settings):
     calls = []
-    reads = ["list_pages", "select_page", "take_snapshot", "inspect_element", "take_screenshot", "wait_for", "list_console_messages",
+    reads = ["list_pages", "select_page", "take_snapshot", "inspect_element", "inspect_web_chat", "take_screenshot", "wait_for", "list_console_messages",
              "get_console_message"]
     entries = _devtools_entries(*reads, calls=calls)
 
     for name in reads:
         assert json.loads(entries[name]["callable"]())["ok"] is True
-        assert entries[name]["metadata"] == {"observation": True, "mutates_state": False, "risk_level": "low"}
+        assert entries[name]["metadata"] == {
+            "observation": True, "mutates_state": False, "risk_level": "low", "durable_builtin": True,
+        }
         assert entries[name]["mcp_bridge"]["approval"]["action"] == "read"
+        from app.agent.durable.operation_policy import classify_tool
+        assert classify_tool(entries[name]["name"], trusted_builtin=True).effect_class == "read_only"
     assert [tool for tool, _ in calls] == reads
+
+    # The durable journal must keep real browser interactions opaque.
+    from app.agent.durable.operation_policy import classify_tool
+    interactions = _devtools_entries("click", "fill", "press_key")
+    for entry in interactions.values():
+        assert entry["metadata"]["durable_builtin"] is True
+        assert classify_tool(entry["name"], trusted_builtin=True).effect_class == "opaque_effect"
 
 
 def test_devtools_interactions_run_without_prompt_but_not_unattended(runtime_settings):

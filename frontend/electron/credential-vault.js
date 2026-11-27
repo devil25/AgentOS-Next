@@ -1,6 +1,7 @@
 const SECRET_FIELDS = Object.freeze({
   openai: { storeKey: 'openai_api_key', backendField: 'openai_api_key' },
   google: { storeKey: 'google_api_key', backendField: 'google_api_key' },
+  compatible: { storeKey: 'compatible_api_key', backendField: 'compatible_api_key' },
   tavily: { storeKey: 'tavily_api_key', backendField: 'tavily_api_key' },
   telegramBot: { storeKey: 'telegram_bot_token', backendField: 'telegram_bot_token' },
 })

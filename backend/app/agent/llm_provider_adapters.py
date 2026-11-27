@@ -74,6 +74,26 @@ class OpenAICompatibleProviderAdapter:
         )
 
 
+class OpenAIChatCompletionsProviderAdapter:
+    provider = "openai_compatible"
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        system_prompt: str = "",
+        stream_callback: Callable[[str], Awaitable[None]] | None = None,
+        tool_choice: str | dict | None = None,
+        reasoning_callback: Callable[[str], Awaitable[None]] | None = None,
+    ) -> Any:
+        return await self._client._openai_chat_completions(
+            messages, tools, system_prompt, stream_callback, tool_choice, reasoning_callback,
+        )
+
+
 class CodexAccountProviderAdapter:
     provider = "codex"
 
@@ -99,6 +119,7 @@ _ADAPTER_FACTORIES = {
     "gemini_generate_content": GeminiProviderAdapter,
     "openai_responses": partial(OpenAICompatibleProviderAdapter, provider="openai"),
     "chatgpt_account": CodexAccountProviderAdapter,
+    "openai_chat_completions": OpenAIChatCompletionsProviderAdapter,
 }
 
 

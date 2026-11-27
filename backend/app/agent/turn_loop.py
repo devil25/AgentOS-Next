@@ -6,6 +6,7 @@ import asyncio
 import itertools
 import json
 import logging
+import re
 import uuid
 from collections import defaultdict
 from typing import AsyncIterator, Callable
@@ -43,6 +44,7 @@ from app.agent.tool_cancellation import set_tool_scope, reset_tool_scope
 from app.agent.harness.workers import unfinished_workers
 from app.agent.tool_observations import attachment_image_payloads
 from app.agent.harness.tool_runner import ToolBatchRunner
+from app.agent.explicit_tool_scope import explicit_tool_scope
 from app.agent.harness.model_request import ModelRequestRunner, ModelRequestError
 from app.agent.harness.turn_transcript import TurnTranscript
 from app.agent.harness.tool_protocol import ToolCallResult
@@ -103,6 +105,99 @@ async def _model_request_or_pause(request, lifecycle):
     request_task.cancel()
     await asyncio.gather(request_task, return_exceptions=True)
     return None
+
+
+def _resolve_explicit_list_pages_call(user_message: str, tools: list[dict]) -> dict | None:
+    """Resolve an explicit, argument-free list_pages request without invoking a model.
+
+    This special case is deliberately narrow: asking a web-chat reasoning client
+    to use list_pages only must not first call inspect_web_chat to communicate
+    with that same web-chat tab.
+    """
+    scope = explicit_tool_scope(user_message)
+    if scope is None or scope.allowed_tool.lower() != "list_pages":
+        return None
+    matches: list[str] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("name") or "")
+        if not scope.allows(name) or not (
+            name == "list_pages" or name.endswith("__list_pages") or name.endswith("_list_pages")
+        ):
+            continue
+        parameters = tool.get("parameters")
+        parameters = parameters if isinstance(parameters, dict) else {}
+        required = parameters.get("required") or []
+        if isinstance(required, list) and not required:
+            matches.append(name)
+    if len(matches) != 1:
+        return None
+    return {
+        "call_id": "explicit-list-pages-" + uuid.uuid4().hex,
+        "name": matches[0],
+        "arguments": {},
+    }
+
+
+def _resolve_explicit_google_open_call(user_message: str, tools: list[dict]) -> dict | None:
+    """Resolve a plain request to open Google without entering web-chat transport.
+
+    Opening a website is a browser-navigation task, not a request to inspect or
+    message the selected reasoning provider. Use new_page so the user's current
+    tab is preserved and no provider-specific inspection is attempted.
+    """
+    text = " ".join(str(user_message or "").casefold().split())
+    patterns = (
+        r"(?:افتح|فتح) .*?(?:جوجل|google)",
+        r"(?:open|go to) .*?google",
+    )
+    if not any(re.search(pattern, text) for pattern in patterns):
+        return None
+
+    matches: list[str] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("name") or "")
+        if not (name == "new_page" or name.endswith("__new_page") or name.endswith("_new_page")):
+            continue
+        parameters = tool.get("parameters")
+        parameters = parameters if isinstance(parameters, dict) else {}
+        properties = parameters.get("properties")
+        properties = properties if isinstance(properties, dict) else {}
+        required = parameters.get("required") or []
+        if "url" in properties and isinstance(required, list) and "url" in required:
+            matches.append(name)
+    if len(matches) != 1:
+        return None
+    return {
+        "call_id": "explicit-open-google-" + uuid.uuid4().hex,
+        "name": matches[0],
+        "arguments": {"url": "https://www.google.com/", "includeSnapshot": False},
+    }
+
+
+def _single_tool_result_text(output: str) -> str:
+    """Prefer the text content of an MCP result over its serialized envelope."""
+    raw = str(output or "")
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    content = payload.get("content")
+    if isinstance(content, list):
+        parts = [
+            str(item.get("text") or "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text")
+        ]
+        if parts:
+            return "\n".join(parts)
+    result = payload.get("result")
+    return str(result) if isinstance(result, str) else raw
 
 
 class TurnLoop:
@@ -173,8 +268,13 @@ class TurnLoop:
         steering: SteeringInbox | None = None,
         *,
         lifecycle: TurnLifecycle,
+        reasoning_client=None,
     ) -> None:
         """Run the react loop, pushing all events into the queue. Caller is responsible for the None sentinel."""
+        active_client = reasoning_client or self.llm_client
+        bind_durable_run = getattr(active_client, "bind_durable_run", None)
+        if callable(bind_durable_run):
+            bind_durable_run(lifecycle.durable_run)
         context_token = set_current_conversation_id(conversation_id)
         tool_scope_token = set_tool_scope(uuid.uuid4().hex)
         obs_run_id = ""
@@ -193,7 +293,7 @@ class TurnLoop:
         turn_thinking_parts: list[str] = []
         persisted_user_ids: list[int] = []
         obs_usage_total = UsageStats()
-        model_budget = ModelUsageBudget(self.max_tokens_per_turn) if isinstance(self.llm_client, LLMClient) else None
+        model_budget = ModelUsageBudget(self.max_tokens_per_turn) if isinstance(active_client, LLMClient) else None
         usage_token = current_model_budget.set(model_budget)
 
         def _turn_usage() -> UsageStats:
@@ -201,9 +301,9 @@ class TurnLoop:
             return model_budget.usage if model_budget is not None else obs_usage_total
 
         budget = self._new_turn_budget()
-        observer = TurnObserver(self.observability, conversation_id=conversation_id, client=self.llm_client)
+        observer = TurnObserver(self.observability, conversation_id=conversation_id, client=active_client)
         _obs_event, _obs_error = observer.event, observer.error
-        transcript = TurnTranscript(provider=str(getattr(self.llm_client, "provider", "") or ""))
+        transcript = TurnTranscript(provider=str(getattr(active_client, "provider", "") or ""))
         response_policy = TurnResponsePolicy()
         task_progress = None
 
@@ -246,14 +346,19 @@ class TurnLoop:
 
         tool_runner = ToolBatchRunner(
             registry=self.registry, executor=self.executor, execution_gate=self.execution_gate,
-            memory=self.memory, client=self.llm_client, budget=budget, transcript=transcript,
+            memory=self.memory, client=active_client, review_client=self.llm_client,
+            budget=budget, transcript=transcript,
             lifecycle=lifecycle, observer=observer, steering=steering,
             user_request=_current_user_request, progress=lambda: latest_progress_text,
             max_parallel=self.max_parallel_tool_calls, max_identical_calls=self.max_identical_calls,
             stuck_rounds_limit=self.STUCK_ROUNDS_LIMIT, guard_blocks_limit=self.GUARD_BLOCKS_LIMIT,
         )
+        bind_browser_tool_executor = getattr(active_client, "bind_browser_tool_executor", None)
+        if callable(bind_browser_tool_executor):
+            bind_browser_tool_executor(tool_runner.execute_transport_tool)
+
         model_runner = ModelRequestRunner(
-            self.llm_client, timeout_seconds=self.max_llm_call_seconds, observer=observer, emit=_put,
+            active_client, timeout_seconds=self.max_llm_call_seconds, observer=observer, emit=_put,
             on_request=lambda: _transition(run_state.model_call),
         )
 
@@ -319,7 +424,7 @@ class TurnLoop:
                     )
                     provider_history_kwargs["provider_history"] = {
                         "provider": "gemini",
-                        "model_name": str(getattr(self.llm_client, "model_name", "") or ""),
+                        "model_name": str(getattr(active_client, "model_name", "") or ""),
                         "messages": transcript.current_turn_messages,
                     }
                 persisted_ids = await persist_turn(
@@ -363,8 +468,8 @@ class TurnLoop:
                 conversation_id=conversation_id,
                 user_message=message,
                 source=infer_source(conversation_id),
-                model=str(getattr(self.llm_client, "model_name", "") or ""),
-                provider=str(getattr(self.llm_client, "provider", "") or ""),
+                model=str(getattr(active_client, "model_name", "") or ""),
+                provider=str(getattr(active_client, "provider", "") or ""),
                 metadata={"attachment_count": len(attachments or [])},
             )
             lifecycle.run_id = observer.run_id = obs_run_id
@@ -421,7 +526,7 @@ class TurnLoop:
             if isinstance(self.memory, MemoryManager):
                 history_kwargs = {
                     "provider": transcript.provider,
-                    "model_name": str(getattr(self.llm_client, "model_name", "") or ""),
+                    "model_name": str(getattr(active_client, "model_name", "") or ""),
                 }
             transcript.messages = self.memory.build_llm_messages(conversation_id, **history_kwargs)
             durable_run = lifecycle.durable_run
@@ -562,8 +667,59 @@ class TurnLoop:
                     break
 
                 streamed_answer_text = ""
+                visible_tools = tool_runner.registry.get_all_tools(visible_only=True)
+                explicit_scope = explicit_tool_scope(message) if iteration_index == 0 else None
+                if explicit_scope is not None and explicit_scope.allowed_tool.lower() == "list_pages":
+                    direct_call = _resolve_explicit_list_pages_call(message, visible_tools)
+                    if direct_call is None:
+                        final_text = (
+                            "The explicitly requested list_pages tool is unavailable, ambiguous, "
+                            "or requires arguments. No other tool was invoked."
+                        )
+                        terminal_error = True
+                        incomplete_reason_code = "explicit_tool_scope_unavailable"
+                        break
+                    batch_outcome = await tool_runner.execute([direct_call])
+                    if batch_outcome.pause is not None:
+                        final_text = batch_outcome.pause.summary or "The requested list_pages action was blocked."
+                        incomplete_reason_code = batch_outcome.pause.reason_code or "explicit_tool_scope_enforced"
+                        terminal_error = batch_outcome.pause.status == "error"
+                        stop_requested = True
+                    elif tool_runner.history:
+                        direct_result = tool_runner.history[-1]
+                        final_text = _single_tool_result_text(str(direct_result.get("output") or ""))
+                        if direct_result.get("status") == "complete":
+                            completed_normally = True
+                        else:
+                            terminal_error = True
+                            incomplete_reason_code = "explicit_tool_scope_tool_failed"
+                    else:
+                        final_text = "The requested list_pages tool returned no result. No other tool was invoked."
+                        terminal_error = True
+                        incomplete_reason_code = "explicit_tool_scope_no_result"
+                    break
+                direct_call = _resolve_explicit_google_open_call(message, visible_tools)
+                if direct_call is not None:
+                    batch_outcome = await tool_runner.execute([direct_call])
+                    if batch_outcome.pause is not None:
+                        final_text = batch_outcome.pause.summary or "The requested Google page could not be opened."
+                        incomplete_reason_code = batch_outcome.pause.reason_code or "explicit_browser_navigation_blocked"
+                        terminal_error = batch_outcome.pause.status == "error"
+                        stop_requested = True
+                    elif tool_runner.history:
+                        direct_result = tool_runner.history[-1]
+                        final_text = _single_tool_result_text(str(direct_result.get("output") or ""))
+                        if direct_result.get("status") == "complete":
+                            completed_normally = True
+                        else:
+                            terminal_error = True
+                            incomplete_reason_code = "explicit_browser_navigation_failed"
+                    else:
+                        final_text = "The requested Google page returned no result."
+                        terminal_error = True
+                        incomplete_reason_code = "explicit_browser_navigation_no_result"
+                    break
                 try:
-                    visible_tools = tool_runner.registry.get_all_tools(visible_only=True)
                     model_result = await _model_request_or_pause(model_runner.request(transcript.snapshot(
                         tools=visible_tools, system_prompt=_current_system_prompt(),
                         metadata={"iteration": iteration_index + 1, "consumed": budget.consumed},
@@ -968,6 +1124,7 @@ class TurnLoop:
         steering: SteeringInbox | None = None,
         durable_run=None,
         durable_run_factory=None,
+        reasoning_client=None,
     ) -> AsyncIterator[dict]:
         async with _SESSION_LOCKS[conversation_id]:
             if durable_run is None and callable(durable_run_factory):
@@ -987,7 +1144,7 @@ class TurnLoop:
             worker_task = asyncio.create_task(lifecycle.drive(
                 self._react_worker(
                     message, conversation_id, system_prompt, publisher, attachments,
-                    steering=steering, lifecycle=lifecycle,
+                    steering=steering, lifecycle=lifecycle, reasoning_client=reasoning_client,
                 ),
                 timeout_seconds=self.max_turn_seconds,
             ))

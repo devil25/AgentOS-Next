@@ -57,6 +57,7 @@ TEST_GROUPS = {
         "test_tool_registry_enhanced.py",
         "test_builtin_mcp.py",
         "test_turn_loop.py",
+        "test_explicit_tool_scope.py",
     },
     "policy": {
         "test_data_scope.py",
@@ -119,6 +120,13 @@ TEST_GROUPS = {
         "test_observability_recorder.py",
     },
     "integrations": {
+        "test_adapter.py",
+        "test_chrome_port.py",
+        "test_coordinator.py",
+        "test_llm_client.py",
+        "test_protocol.py",
+        "test_session_store.py",
+        "test_model_catalog.py",
         "test_scheduler_dispatch.py",
         "test_scheduler.py",
         "test_telegram_integration.py",

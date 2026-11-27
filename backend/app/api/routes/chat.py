@@ -117,6 +117,16 @@ async def chat(req: ChatRequest, request: Request):
             merged = build_runtime_namespace(settings, load_agent_settings(settings))
             from app.agent.runtime import run_agent_stream
 
+            reasoning_client = None
+            if req.web_chat_provider is not None:
+                from app.agent.web_chat.session_store import build_web_chat_reasoning_client
+
+                reasoning_client = build_web_chat_reasoning_client(
+                    req.web_chat_provider,
+                    req.web_chat_page_id,
+                    run_id=inbox.run_id,
+                )
+
             async for event_dict in run_agent_stream(
                 message=message,
                 conversation_id=conv_id,
@@ -129,6 +139,7 @@ async def chat(req: ChatRequest, request: Request):
                 interactive=True,
                 steering=inbox,
                 durable_run_id=inbox.run_id,
+                reasoning_client=reasoning_client,
             ):
                 event_name = event_dict.get("event", "message")
                 if event_name == "done":
@@ -260,6 +271,16 @@ async def create_chat_job(req: ChatRequest, request: Request):
     _prepare_conversation_workspace(req, conv_id)
     job = create_job(conv_id)
 
+    reasoning_client = None
+    if req.web_chat_provider is not None and req.web_chat_page_id is not None:
+        from app.agent.web_chat.session_store import build_web_chat_reasoning_client
+
+        reasoning_client = build_web_chat_reasoning_client(
+            req.web_chat_provider,
+            req.web_chat_page_id,
+            run_id=job.job_id,
+        )
+
     async def _start():
         await run_job(
             job,
@@ -271,6 +292,7 @@ async def create_chat_job(req: ChatRequest, request: Request):
             principal_id=owner_principal_id,
             permission_profile_id="desktop-current",
             interactive=True,
+            reasoning_client=reasoning_client,
         )
 
     asyncio.create_task(_start())

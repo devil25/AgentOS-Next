@@ -10,6 +10,7 @@ import {
   type StepEvent,
   type AccessGrantRequiredEvent,
   type SavedMessage,
+  type WebChatTarget,
 } from '../lib/api/types'
 import type { ChatRun, UploadedAttachment } from '../lib/api/types'
 
@@ -87,6 +88,7 @@ export interface QueuedMessage {
   text: string
   attachments: UploadedAttachment[]
   conversationId: string | null
+  webChatTarget?: WebChatTarget
 }
 
 interface StreamDonePayload {
@@ -268,9 +270,9 @@ export function useChat(conversationId: string | null) {
     setRefreshNonce((value) => value + 1)
   }, [conversationId, isStreaming])
 
-  const queueMessage = useCallback((text: string, attachments: UploadedAttachment[] = []) => {
+  const queueMessage = useCallback((text: string, attachments: UploadedAttachment[] = [], webChatTarget?: WebChatTarget) => {
     const conversation = steeringTargetRef.current?.conversationId ?? conversationIdRef.current
-    setQueued((current) => [...current, { id: crypto.randomUUID(), text, attachments, conversationId: conversation }])
+    setQueued((current) => [...current, { id: crypto.randomUUID(), text, attachments, conversationId: conversation, webChatTarget }])
   }, [])
 
   const removeQueued = useCallback((id: string) => {
@@ -334,6 +336,7 @@ export function useChat(conversationId: string | null) {
       workspaceDir?: string,
       // Watch this turn that is already running (a chat reopened mid-turn) instead of starting one.
       follow?: ChatRun,
+      webChatTarget?: WebChatTarget,
     ) => {
       if (!text.trim() || isStreaming) return
       steeringTargetRef.current = null
@@ -826,6 +829,7 @@ export function useChat(conversationId: string | null) {
         workspaceDir,
         runId,
         follow?.run_id,
+        webChatTarget,
       )
 
       abortRef.current = abort

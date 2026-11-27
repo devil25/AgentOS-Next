@@ -7,6 +7,7 @@ import type {
   UploadedAttachment,
   TurnStartedEvent,
   SteeringAppliedEvent,
+  WebChatTarget,
 } from './types'
 
 const DEBUG_ENDPOINT = String(import.meta.env.VITE_DEBUG_INGEST_URL || '').trim()
@@ -249,6 +250,7 @@ export function chatStream(
   runId?: string,
   // Follow this already-running turn (replayed from its start) instead of starting one.
   followRunId?: string,
+  webChatTarget?: WebChatTarget,
 ): () => void {
   const controller = new AbortController()
 
@@ -290,7 +292,10 @@ export function chatStream(
         : await apiFetch(`${BASE}/api/chat`, {
           method: 'POST',
           headers: JSON_HEADERS,
-          body: JSON.stringify({ message, conversation_id: conversationId, run_id: runId, attachments, workspace_dir: workspaceDir }),
+          body: JSON.stringify({
+            message, conversation_id: conversationId, run_id: runId, attachments, workspace_dir: workspaceDir,
+            ...(webChatTarget ? { web_chat_provider: webChatTarget.provider, web_chat_page_id: webChatTarget.pageId } : {}),
+          }),
           signal: controller.signal,
         })
       if (controller.signal.aborted) return

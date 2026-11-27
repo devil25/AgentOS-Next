@@ -108,7 +108,7 @@ def build_identity_prompt(settings) -> str:
 
 
 class AgentRuntime:
-    def __init__(self, settings):
+    def __init__(self, settings, *, llm_client=None):
         self.settings = settings
         self._active_runs = 0
         self._retired = False
@@ -120,10 +120,11 @@ class AgentRuntime:
             getattr(settings, "reasoning_effort", ""),
         )
 
-        self.llm_client = LLMClient(
+        self.llm_client = llm_client or LLMClient(
             provider=settings.model_provider,
             model_name=settings.model_name,
             api_key=api_key,
+            base_url=getattr(getattr(settings, "llm", None), "compatible_base_url", ""),
             reasoning_effort=getattr(settings, "reasoning_effort", "medium"),
         )
         self.skills, self.tool_registry = load_tools(settings)
@@ -184,6 +185,7 @@ class AgentRuntime:
         steering: SteeringInbox | None = None,
         durable_run=None,
         durable_run_factory=None,
+        reasoning_client=None,
     ) -> AsyncIterator[dict]:
         global _active_run_count
         conversation = get_db().get_conversation(conversation_id) or {}
@@ -299,6 +301,7 @@ class AgentRuntime:
                 **({"steering": steering} if steering is not None else {}),
                 **({"durable_run": durable_run} if durable_run is not None else {}),
                 **({"durable_run_factory": durable_run_factory} if durable_run is None and callable(durable_run_factory) else {}),
+                **({"reasoning_client": reasoning_client} if reasoning_client is not None else {}),
             ):
                 yield event
         finally:
@@ -380,6 +383,7 @@ def _settings_cache_key(settings) -> str:
         str(getattr(llm_settings, "max_turn_seconds", "")),
         str(getattr(llm_settings, "max_llm_call_seconds", "")),
         str(getattr(llm_settings, "max_tokens_per_turn", "")),
+        str(getattr(llm_settings, "compatible_base_url", "")),
         _key_fingerprint(getattr(settings, "google_api_key", "") or ""),
         _key_fingerprint(provider_key or ""),
     ]
@@ -444,6 +448,7 @@ async def run_agent_stream(
     steering: SteeringInbox | None = None,
     durable_run_id: str | None = None,
     durable_run=None,
+    reasoning_client=None,
 ):
     session_token = set_current_control_session_id(control_session_id)
     source_token = set_current_execution_source(execution_source)
@@ -470,7 +475,7 @@ async def run_agent_stream(
                 latest_conversation = database.get_conversation(conversation_id) or {}
                 if str(latest_conversation.get("workspace_dir") or "") != workspace_dir:
                     raise RuntimeError("Conversation workspace changed before the turn acquired ownership.")
-                return create_durable_run(
+                durable = create_durable_run(
                     run_id=stable_id or None,
                     conversation_id=conversation_id,
                     execution_source=execution_source,
@@ -479,11 +484,18 @@ async def run_agent_stream(
                     workspace_dir=workspace_dir,
                     checkpoint_files=False,
                 )
+                web_chat_provider = str(getattr(reasoning_client, "web_chat_provider", "") or "")
+                web_chat_page_id = getattr(reasoning_client, "tab_id", None)
+                if web_chat_provider and web_chat_page_id is not None:
+                    from app.agent.web_chat.session_store import save_web_chat_run_context
+                    save_web_chat_run_context(durable.run_id, web_chat_provider, int(web_chat_page_id))
+                return durable
             async for event in runtime.run(
                 message, conversation_id, attachments=attachments,
                 durable_run=durable_run,
                 **({"durable_run_factory": durable_run_factory} if durable_run is None else {}),
                 **({"steering": steering} if steering is not None else {}),
+                **({"reasoning_client": reasoning_client} if reasoning_client is not None else {}),
             ):
                 yield event
         except Exception:
@@ -576,6 +588,9 @@ async def resume_agent_stream(
         }}
         return
 
+    from app.agent.web_chat.session_store import restore_web_chat_reasoning_client
+
+    reasoning_client = restore_web_chat_reasoning_client(run_id)
     async for event in run_agent_stream(
         message=CONTINUATION_PROMPT,
         conversation_id=conversation_id,
@@ -587,5 +602,6 @@ async def resume_agent_stream(
         permission_profile_id=permission_profile_id,
         interactive=interactive,
         durable_run=durable_run,
+        reasoning_client=reasoning_client,
     ):
         yield event

@@ -1,6 +1,7 @@
 export type StoredCredentialStatus = {
   openai: boolean
   google: boolean
+  compatible: boolean
   tavily: boolean
   telegramBot: boolean
 }
@@ -8,6 +9,7 @@ export type StoredCredentialStatus = {
 const EMPTY_STATUS: StoredCredentialStatus = {
   openai: false,
   google: false,
+  compatible: false,
   tavily: false,
   telegramBot: false,
 }

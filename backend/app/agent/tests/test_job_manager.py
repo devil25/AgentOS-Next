@@ -40,3 +40,28 @@ def test_job_append_event_counts_bounded_subscriber_overflow():
 
     assert queue.qsize() == 1
     assert job.dropped_subscriber_events == 1
+
+def test_detached_job_passes_web_chat_reasoning_client(monkeypatch):
+    from app.agent import runtime
+    from app.agent.job_manager import run_job
+
+    captured = {}
+    reasoning_client = object()
+
+    async def fake_run_agent_stream(**kwargs):
+        captured.update(kwargs)
+        yield {"event": "done", "data": {"conversation_id": "conv-1"}}
+
+    monkeypatch.setattr(runtime, "run_agent_stream", fake_run_agent_stream)
+    job = JobState(job_id="job-web-chat", conversation_id="conv-1")
+
+    asyncio.run(run_job(
+        job,
+        "Use the selected web chat",
+        settings=object(),
+        reasoning_client=reasoning_client,
+    ))
+
+    assert captured["reasoning_client"] is reasoning_client
+    assert captured["durable_run_id"] == "job-web-chat"
+    assert job.status == RunState.DONE

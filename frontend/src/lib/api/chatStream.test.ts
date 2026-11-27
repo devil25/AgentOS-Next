@@ -23,6 +23,23 @@ describe('chat stream completion', () => {
     })
   })
 
+  it('includes the selected web-chat provider and Chrome page in a new task', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(new Response('event: done\ndata: {"status":"complete"}\n\n'))
+    const onDone = vi.fn()
+    const args = [
+      'Use the signed-in ChatGPT tab', null, [], vi.fn(), vi.fn(), vi.fn(), onDone, vi.fn(),
+      ...Array.from({ length: 20 }, () => undefined),
+      { provider: 'chatgpt', pageId: 17 },
+    ] as unknown as Parameters<typeof chatStream>
+    chatStream(...args)
+    await vi.waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(JSON.parse(String(vi.mocked(apiFetch).mock.calls[0][1]?.body))).toMatchObject({
+      message: 'Use the signed-in ChatGPT tab',
+      web_chat_provider: 'chatgpt',
+      web_chat_page_id: 17,
+    })
+  })
+
   it.each([false, true])('requires a terminal event to report success (completed: %s)', async (completed) => {
     const token = 'event: token\ndata: {"content":"Partial answer"}\n\n'
     const done = 'event: done\ndata: {"conversation_id":"chat-a","status":"complete"}\n\n'

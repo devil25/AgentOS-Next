@@ -78,7 +78,7 @@ export type SettingsPageId = keyof typeof PAGE_COPY
 /* ------------------------------------------------------------------ model --- */
 
 export const MODEL_COPY = {
-  provider: 'Choose OpenAI account, OpenAI API, or Google. Connect the selected provider under Connections.',
+  provider: 'Choose an OpenAI account, OpenAI API, Google, a cloud-compatible service, or a local Ollama / LM Studio server. Compatible endpoints can load their available model IDs automatically.',
   model: 'Bigger models reason better and cost more per message. Smaller "mini"/"flash" models are faster and cheaper.',
   reasoningEffort: 'How long the model is allowed to think before it answers. Higher settings give better results on hard problems but are slower and cost more.',
   vision: 'Screenshots and image attachments go straight to the model you picked above, which reads them natively. No separate vision model is needed.',

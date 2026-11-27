@@ -301,6 +301,70 @@ def test_resume_run_carries_verified_operation_evidence_into_new_attempt(tmp_pat
     db.close()
 
 
+
+def test_dispatch_guard_allows_only_list_pages_through_quarantined_shared_workspace(tmp_path):
+    from app.agent.durable.operation_execution import prepare_tool_operation
+
+    db, journal = _new_journal(tmp_path)
+    current_owner = get_owner_instance_id()
+    workspace = str(tmp_path / "shared-workspace")
+    current = _create_run(
+        journal, owner=current_owner, run_id="guard-reader",
+        turn_id="guard-reader-turn", conversation_id="guard-reader-chat",
+        workspace_dir=workspace,
+    )
+    old_owner = "owner-v1-" + "f" * 32
+    blocked = _create_run(
+        journal, owner=old_owner, run_id="guard-uncertain",
+        turn_id="guard-uncertain-turn", conversation_id="guard-uncertain-chat",
+        workspace_dir=str(tmp_path / "isolated-old-workspace"),
+    )
+    db.update_conversation("guard-uncertain-chat", workspace_dir=workspace)
+    db.execute("UPDATE agent_runs SET workspace_dir=? WHERE run_id=?", (workspace, "guard-uncertain"))
+    db.commit()
+    operation = journal.prepare_operation(
+        "guard-uncertain", operation_id="guard-opaque-write",
+        owner_instance_id=old_owner, attempt=int(blocked["attempt"]),
+        operation_kind="browser_action", effect_class="opaque_effect",
+    )
+    journal.transition_operation(
+        "guard-uncertain", operation["operation_id"], to_status="authorized",
+        owner_instance_id=old_owner, attempt=int(blocked["attempt"]),
+    )
+    journal.transition_operation(
+        "guard-uncertain", operation["operation_id"], to_status="executing",
+        owner_instance_id=old_owner, attempt=int(blocked["attempt"]),
+    )
+    db.execute(
+        "UPDATE agent_runs SET status='needs_review', reason_code='recovery_incomplete' WHERE run_id=?",
+        ("guard-uncertain",),
+    )
+    db.commit()
+
+    with pytest.raises(DispatchConflictError, match="another durable run"):
+        prepare_tool_operation(
+            {"journal": journal, "run_id": "guard-reader", "owner_instance_id": current_owner,
+             "attempt": int(current["attempt"])},
+            tool_name="mcp__chrome-devtools__take_snapshot", trusted_builtin=True,
+        )
+
+    page_inventory = prepare_tool_operation(
+        {"journal": journal, "run_id": "guard-reader", "owner_instance_id": current_owner,
+         "attempt": int(current["attempt"])},
+        tool_name="mcp__chrome-devtools__list_pages", trusted_builtin=True,
+    )
+    assert page_inventory is not None
+    assert page_inventory.effect_class == "read_only"
+    page_inventory.begin_effect()
+    page_inventory.settle('{"pages": []}')
+
+    with pytest.raises(DispatchConflictError, match="another durable run"):
+        assert_run_dispatch_allowed(
+            {"journal": journal, "run_id": "guard-reader", "owner_instance_id": current_owner,
+             "attempt": int(current["attempt"])}
+        )
+    db.close()
+
 def test_dispatch_guard_allows_same_process_workspace_siblings_and_blocks_cross_process_overlap(tmp_path):
     db, journal = _new_journal(tmp_path)
     current_owner = get_owner_instance_id()

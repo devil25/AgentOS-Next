@@ -36,7 +36,7 @@ let CONTROL_PROFILE_ID = null
 const BACKEND_RESTART_EXIT_CODE = 78
 const isDev = !app.isPackaged
 const useDevServer = useDevelopmentRenderer(app.isPackaged)
-const APP_USER_MODEL_ID = 'com.monaw.agent'
+const APP_USER_MODEL_ID = 'com.agentos.next'
 const LEGACY_USER_DATA_DIR_NAMES = ['AI Agent', 'ai-agent']
 const APP_THEME_COLORS = {
   dark: '#111b13',
@@ -209,6 +209,7 @@ function reportStartupFailure(reason, logPath = path.join(getBackendRuntimeDir()
     },
   })
 }
+app.setName('AgentOS-Next')
 if (process.platform === 'win32') {
   app.setAppUserModelId(APP_USER_MODEL_ID)
 }
@@ -484,6 +485,9 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    // Show only after Chromium has painted the first frame to avoid a blank flash.
+    // Explicitly showing also makes the app visible when the launcher is started hidden.
+    show: false,
     // On Windows and Linux the renderer draws its own window buttons in the
     // app bar (window:control), so no native caption buttons are shown.
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
@@ -503,13 +507,27 @@ function createWindow() {
     },
   })
 
+  mainWindow.once('ready-to-show', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.show()
+    mainWindow.focus()
+    console.log('[main] AgentOS-Next window shown')
+  })
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[main] Renderer failed to load', { errorCode, errorDescription, validatedURL })
+  })
+
   if (useDevServer) {
-    mainWindow.loadURL('http://localhost:5275')
+    mainWindow.loadURL('http://localhost:5275').catch((err) => {
+      console.error('[main] Failed to load development renderer:', err.message)
+    })
     if (process.env.MONAW_DEVTOOLS === '1') {
       mainWindow.webContents.openDevTools({ mode: 'detach' })
     }
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html')).catch((err) => {
+      console.error('[main] Failed to load packaged renderer:', err.message)
+    })
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -562,7 +580,7 @@ app.whenReady().then(async () => {
     publish: (state) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('updates:state', state)
       if (state.status === 'ready' && Notification.isSupported()) {
-        const notice = new Notification({ title: 'Monaw update ready', body: `Version ${state.latestVersion} is ready. Open Settings > About to install it.` })
+        const notice = new Notification({ title: 'AgentOS-Next update ready', body: `Version ${state.latestVersion} is ready. Open Settings > About to install it.` })
         notice.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus() } })
         notice.show()
       }

@@ -7,12 +7,19 @@ import { ModelPicker } from './ModelPicker'
 import { fetchContextUsage } from '../lib/api/conversations'
 import { transcribeSpeech } from '../lib/api/speechToText'
 import { uploadAttachment } from '../lib/api/uploads'
-import type { AgentSettings, ContextUsage, ModelOptions, UploadedAttachment } from '../lib/api/types'
+import type { AgentSettings, ContextUsage, ModelOptions, UploadedAttachment, WebChatProvider, WebChatTarget } from '../lib/api/types'
 import type { QueuedMessage } from '../hooks/useChat'
 
 type ApprovalMode = AgentSettings['permissions']['mode']
 type ModelSelection = Pick<AgentSettings['llm'], 'provider' | 'model_name' | 'reasoning_effort'>
 
+const WEB_CHAT_OPTIONS: Array<{ value: '' | WebChatProvider; label: string; shortLabel?: string }> = [
+  { value: '', label: 'Configured model', shortLabel: 'Model' },
+  { value: 'chatgpt', label: 'ChatGPT website', shortLabel: 'ChatGPT' },
+  { value: 'gemini', label: 'Gemini website', shortLabel: 'Gemini' },
+  { value: 'deepseek', label: 'DeepSeek website', shortLabel: 'DeepSeek' },
+  { value: 'zai', label: 'Z.ai website', shortLabel: 'Z.ai' },
+]
 const APPROVAL_OPTIONS: Array<{ value: ApprovalMode; label: string }> = [
   { value: 'default', label: 'Default' },
   { value: 'full_access', label: 'Full Access' },
@@ -131,12 +138,12 @@ interface Props {
   workspaceDir?: string
   workspaceIsDefault?: boolean
   onWorkspaceChange?: (path: string) => Promise<void>
-  onSend: (text: string, attachments?: UploadedAttachment[]) => void
+  onSend: (text: string, attachments?: UploadedAttachment[], webChatTarget?: WebChatTarget) => void
   onSteer?: (text: string, attachments?: UploadedAttachment[]) => Promise<void>
   steeringConversationId?: string | null
   queued?: QueuedMessage[]
   queuePaused?: boolean
-  onQueue?: (text: string, attachments?: UploadedAttachment[]) => void
+  onQueue?: (text: string, attachments?: UploadedAttachment[], webChatTarget?: WebChatTarget) => void
   onRemoveQueued?: (id: string) => void
   onSendQueuedNow?: (id: string) => void
   onStop: () => void
@@ -199,6 +206,8 @@ export function InputBar({
   const [runControlPending, setRunControlPending] = useState(false)
   const [runControlError, setRunControlError] = useState('')
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [webChatProvider, setWebChatProvider] = useState<'' | WebChatProvider>('')
+  const [webChatPageId, setWebChatPageId] = useState('')
   const [uploading, setUploading] = useState(false)
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
@@ -227,6 +236,13 @@ export function InputBar({
   const voiceStopRequestedRef = useRef(false)
   const selectedModelAvailable = !modelCatalogLoading
     && modelOptions.providers.find((connection) => connection.id === modelSelection.provider)?.available !== false
+  const parsedWebChatPageId = Number(webChatPageId)
+  const validManualPageId = /^\d+$/.test(webChatPageId.trim())
+    && Number.isSafeInteger(parsedWebChatPageId) && parsedWebChatPageId >= 1
+  const webChatTarget = webChatProvider
+    ? { provider: webChatProvider, ...(validManualPageId ? { pageId: parsedWebChatPageId } : {}) }
+    : undefined
+  const reasoningEngineReady = webChatProvider ? true : selectedModelAvailable
   const settingsSaving = modelSelectionDisabled || approvalModeDisabled
   const canSteer = Boolean(isStreaming && onSteer && steeringConversationId)
   const canQueue = Boolean(isStreaming && onQueue)
@@ -300,15 +316,18 @@ export function InputBar({
     const trimmed = value.trim()
     const message = trimmed || (selectedFiles.length ? 'Please review the attached file(s).' : '')
     const queueing = queue && canQueue
-    if (!message || !selectedModelAvailable || settingsSaving || (isStreaming && !canSteer && !queueing) || disabled || uploading || recording || transcribing) return
+    if (!message || !reasoningEngineReady || settingsSaving || (isStreaming && !canSteer && !queueing) || disabled || uploading || recording || transcribing) return
     setUploadError('')
     setUploading(true)
     try {
       const attachments = selectedFiles.length
         ? await Promise.all(selectedFiles.map((file) => uploadAttachment(file, isStreaming ? steeringConversationId ?? conversationId : conversationId)))
         : []
-      if (queueing && onQueue) onQueue(message, attachments)
-      else if (isStreaming && onSteer) await onSteer(message, attachments)
+      if (queueing && onQueue) {
+        if (webChatTarget) onQueue(message, attachments, webChatTarget)
+        else onQueue(message, attachments)
+      } else if (isStreaming && onSteer) await onSteer(message, attachments)
+      else if (webChatTarget) onSend(message, attachments, webChatTarget)
       else onSend(message, attachments)
       setValue('')
       setSelectedFiles([])
@@ -812,10 +831,41 @@ export function InputBar({
 
             <div className="flex min-w-0 items-center justify-end gap-2">
               {!recording && (
-                <>
-                  <ModelPicker value={modelSelection} catalog={modelOptions} onChange={onModelSelectionChange}
-                    disabled={modelSelectionDisabled} loading={modelCatalogLoading} onRetry={onRetryModelCatalog} compact />
-                </>
+                <div className="flex min-w-0 items-center gap-1">
+                  <Dropdown<'' | WebChatProvider>
+                    ariaLabel="Reasoning engine"
+                    value={webChatProvider}
+                    options={WEB_CHAT_OPTIONS}
+                    onChange={(provider) => {
+                      setWebChatProvider(provider)
+                      setWebChatPageId('')
+                    }}
+                    disabled={isStreaming || settingsSaving}
+                    size="sm"
+                    title={isStreaming
+                      ? "The reasoning engine is fixed for the active task. Stop it before switching providers."
+                      : "Choose the configured model or a signed-in provider website"}
+                  />
+                  {webChatProvider ? (
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={webChatPageId}
+                      onChange={(event) => setWebChatPageId(event.target.value)}
+                      placeholder="Auto"
+                      aria-label="Chrome page ID"
+                      disabled={isStreaming || settingsSaving}
+                      title={isStreaming
+                        ? "The Chrome page is fixed for the active task."
+                        : "Leave blank to discover the matching signed-in provider tab automatically, or enter a page ID to choose one explicitly."}
+                      className="h-7 w-[76px] rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-[11px] text-neutral-200 outline-none focus:border-accent/50"
+                    />
+                  ) : (
+                    <ModelPicker value={modelSelection} catalog={modelOptions} onChange={onModelSelectionChange}
+                      disabled={modelSelectionDisabled} loading={modelCatalogLoading} onRetry={onRetryModelCatalog} compact />
+                  )}
+                </div>
               )}
 
               {/* Context usage ring */}
@@ -857,7 +907,7 @@ export function InputBar({
                 <button
                   type="button"
                   onClick={() => { void handleSend(true) }}
-                  disabled={(!value.trim() && selectedFiles.length === 0) || !selectedModelAvailable || settingsSaving || disabled || uploading || recording || transcribing}
+                  disabled={(!value.trim() && selectedFiles.length === 0) || !reasoningEngineReady || settingsSaving || disabled || uploading || recording || transcribing}
                   className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[0.07] bg-white/[0.03] text-neutral-400 outline-none transition-colors hover:border-white/[0.12] hover:text-neutral-100 focus:border-accent/50 disabled:opacity-50"
                   aria-label="Queue message"
                   title="Queue: send after this reply ends (Tab)"
@@ -868,7 +918,7 @@ export function InputBar({
               <button
                 type="button"
                 onClick={() => { void handleSend() }}
-                disabled={(!value.trim() && selectedFiles.length === 0) || !selectedModelAvailable || settingsSaving || (isStreaming && !canSteer) || disabled || uploading || recording || transcribing}
+                disabled={(!value.trim() && selectedFiles.length === 0) || !reasoningEngineReady || settingsSaving || (isStreaming && !canSteer) || disabled || uploading || recording || transcribing}
                 className="h-7 w-7 shrink-0 rounded-lg primary-button"
                 aria-label={isStreaming ? 'Steer message' : 'Send message'}
                 title={isStreaming ? 'Steer the running task' : 'Send message'}

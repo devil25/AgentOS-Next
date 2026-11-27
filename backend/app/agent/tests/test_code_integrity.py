@@ -60,10 +60,10 @@ def test_release_version_metadata_and_installer_filename_are_synchronized():
     assert app.version == version
 
     build = frontend_package["build"]
-    assert build["nsis"]["artifactName"] == "Monaw-Setup-${version}-x64.${ext}"
+    assert build["nsis"]["artifactName"] == "AgentOS-Next-Setup-${version}-x64.${ext}"
     main_source = (backend_dir / "app" / "main.py").read_text(encoding="utf-8")
     diagnostics_source = (backend_dir / "app" / "api" / "routes" / "diagnostics.py").read_text(encoding="utf-8")
     assert re.search(r'\bversion\s*=\s*"' + re.escape(version) + r'"', main_source)
     assert re.search(r'"version"\s*:\s*"' + re.escape(version) + r'"', diagnostics_source)
     installation_doc = (repo_root / "docs" / "installation.md").read_text(encoding="utf-8")
-    assert f"Monaw-Setup-{version}-x64.exe" in installation_doc
+    assert f"AgentOS-Next-Setup-{version}-x64.exe" in installation_doc

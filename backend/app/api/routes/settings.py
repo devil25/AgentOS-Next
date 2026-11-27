@@ -169,6 +169,9 @@ async def update_settings(body: SettingsUpdate):
     if assign_if_changed("google_api_key", body.google_api_key):
         changed = True
         runtime_changed = True
+    if assign_if_changed("compatible_api_key", body.compatible_api_key):
+        changed = True
+        runtime_changed = True
     if assign_if_changed("tavily_api_key", body.tavily_api_key):
         changed = True
         runtime_changed = True
@@ -248,8 +251,14 @@ async def get_settings():
 
 @router.get("/settings/model-options", response_model=ModelOptionsPayload)
 async def get_model_options():
-    custom_models = load_agent_settings(settings).llm.custom_models
-    return await asyncio.to_thread(model_options_payload, custom_models, settings=settings)
+    llm_settings = load_agent_settings(settings).llm
+    return await asyncio.to_thread(
+        model_options_payload,
+        llm_settings.custom_models,
+        settings=settings,
+        compatible_base_url=llm_settings.compatible_base_url,
+        compatible_api_key=getattr(settings, "compatible_api_key", ""),
+    )
 
 
 @router.get("/settings/workspace-instructions", response_model=WorkspaceInstructionsPayload)

@@ -9,6 +9,7 @@ import hashlib
 import uuid
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -112,6 +113,7 @@ class PermissionProfileSettings(BaseModel):
 class LLMSettings(BaseModel):
     provider: ProviderId = "openai"
     model_name: str = DEFAULT_OPENAI_CHAT_MODEL
+    compatible_base_url: str = ""
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] = "medium"
     # Model calls per chat message; 0 is no limit. Unattended runs stop at 200.
     max_iterations_per_turn: int = Field(0, ge=0, le=500)
@@ -121,6 +123,27 @@ class LLMSettings(BaseModel):
     max_tokens_per_turn: int = Field(DEFAULT_MAX_TOKENS_PER_TURN, ge=0, le=100_000_000)
     # Model names the user added per provider, offered beside the built-in ones.
     custom_models: dict[str, list[str]] = Field(default_factory=dict)
+
+    @field_validator("compatible_base_url", mode="before")
+    @classmethod
+    def validate_compatible_base_url(cls, value: Any) -> str:
+        """Require HTTPS for remote endpoints; allow HTTP only for loopback services."""
+        candidate = str(value or "").strip().rstrip("/")
+        if not candidate:
+            return ""
+        try:
+            parsed = urlsplit(candidate)
+            hostname = (parsed.hostname or "").lower()
+            _ = parsed.port
+        except ValueError:
+            raise ValueError("API base URL must be a valid HTTP(S) URL.") from None
+        if parsed.scheme not in {"https", "http"} or not hostname:
+            raise ValueError("API base URL must use HTTPS, or HTTP for a local endpoint.")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("API base URL cannot contain credentials, query parameters, or fragments.")
+        if parsed.scheme == "http" and hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("Remote API base URLs must use HTTPS.")
+        return candidate
 
     @field_validator("custom_models")
     @classmethod
@@ -139,7 +162,9 @@ class LLMSettings(BaseModel):
         self.model_name = normalize_chat_model(self.provider, self.model_name, self.custom_models.get(self.provider, []))
         if not re.match(MODEL_NAME_PATTERN, self.model_name):
             self.model_name = normalize_chat_model(self.provider, "")
-        self.reasoning_effort = normalize_reasoning_effort(self.provider, self.model_name, self.reasoning_effort)
+        self.reasoning_effort = normalize_reasoning_effort(
+            self.provider, self.model_name, self.reasoning_effort, self.compatible_base_url,
+        )
         return self
 
 
@@ -471,7 +496,7 @@ def _normalize_browser_payload(browser: Any) -> dict[str, Any]:
 
 def build_default_agent_settings(base_settings) -> AgentSettings:
     mode = "default"
-    provider = base_settings.model_provider if base_settings.model_provider in {"openai", "gemini", "codex"} else "openai"
+    provider = base_settings.model_provider if base_settings.model_provider in CHAT_MODELS_BY_PROVIDER else "openai"
     model_name = str(getattr(base_settings, "model_name", "") or "").strip()
     model_name = normalize_chat_model(provider, model_name)
     return AgentSettings(
@@ -801,12 +826,14 @@ def build_runtime_namespace(base_settings, agent_settings: AgentSettings):
         model_name=agent_settings.llm.model_name,
         openai_api_key=base_settings.openai_api_key,
         google_api_key=base_settings.google_api_key,
+        compatible_api_key=getattr(base_settings, "compatible_api_key", ""),
         tavily_api_key=base_settings.tavily_api_key,
         telegram_bot_token=getattr(base_settings, "telegram_bot_token", ""),
         reasoning_effort=agent_settings.llm.reasoning_effort,
         llm=SimpleNamespace(
             provider=agent_settings.llm.provider,
             model_name=agent_settings.llm.model_name,
+            compatible_base_url=agent_settings.llm.compatible_base_url,
             reasoning_effort=agent_settings.llm.reasoning_effort,
             max_iterations_per_turn=agent_settings.llm.max_iterations_per_turn,
             max_turn_seconds=agent_settings.llm.max_turn_seconds,
@@ -846,6 +873,7 @@ def api_settings_payload(base_settings, agent_settings: AgentSettings) -> dict[s
         "api_keys": {
             "has_openai_key": bool(base_settings.openai_api_key),
             "has_google_key": bool(base_settings.google_api_key),
+            "has_compatible_key": bool(getattr(base_settings, "compatible_api_key", "")),
             "has_tavily_key": bool(base_settings.tavily_api_key),
             "has_telegram_bot_token": bool(getattr(base_settings, "telegram_bot_token", "")),
             "has_telegram_allowlist": bool(

@@ -375,6 +375,22 @@ def _blocked_scope(reason: str) -> str:
 def _browser_context(manager, tool_name: str, arguments: dict, upload_scope=None) -> dict:
     response = json.loads(manager.call_tool_sync("__monaw_action_context", {"tool_name": tool_name, "arguments": arguments,
                                                                           "upload_scope": upload_scope}))
+    if response.get("is_error") or response.get("ok") is False:
+        content = response.get("content") or []
+        details = [
+            str(item.get("text") or "").strip()
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text")
+        ]
+        error = response.get("error")
+        if isinstance(error, dict):
+            details.insert(0, str(error.get("message") or error.get("code") or "").strip())
+        elif error:
+            details.insert(0, str(error).strip())
+        # Preserve the trusted browser adapter's actionable connection/runtime
+        # error instead of replacing it with a generic missing-context message.
+        message = "; ".join(item for item in details if item)[:1000] or "Browser runtime context could not be established."
+        raise ValueError(message)
     context = (response.get("structured_content") or response.get("structuredContent") or {}).get("browser_action_context")
     if not isinstance(context, dict) or not context.get("context_token"):
         raise ValueError("browser_runtime_context_unavailable")
@@ -574,6 +590,13 @@ def build_tool_entries(cfg: MCPServerConfig, manager, mcp_tools: list[Any]) -> l
                 return url_blocked
             return _call_mcp_tool(manager, _reflected_name, _tool_name, arguments, _schema_hash)
 
+        metadata = _tool_metadata(decision, annotations)
+        if cfg.name in BUILTIN_SERVER_SKILLS:
+            # The durable journal may apply the narrow trusted-builtin allowlist
+            # to known read-only tools. User-configured MCP servers never receive
+            # this capability merely from provider annotations or tool names.
+            metadata["durable_builtin"] = True
+
         entries.append(
             {
                 "name": reflected_name,
@@ -583,7 +606,7 @@ def build_tool_entries(cfg: MCPServerConfig, manager, mcp_tools: list[Any]) -> l
                 "domain": "general",
                 "execution_mode": "sync_thread_affine",
                 "affinity_group": f"mcp:{cfg.name}",
-                "metadata": _tool_metadata(decision, annotations),
+                "metadata": metadata,
                 "mcp_bridge": {
                     "server_name": cfg.name,
                     # Built-in servers count as part of the skill that ships them.

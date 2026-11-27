@@ -26,6 +26,7 @@ from .locator import validate_identity
 from .page_state import canonical_hash, context_version, read_page_state, frame_origin, resolve_frame_origins, isolated_dom_context, evaluate_fixed
 from .visual_target import VisualTarget
 from .visual_fallback import VISUAL_HIT_TEST
+from .web_chat_inspection import WEB_CHAT_INSPECTION
 
 DEFAULT_NAVIGATION_TIMEOUT_S = 30.0
 DEFAULT_WAIT_FOR_TIMEOUT_S = 15.0
@@ -196,10 +197,15 @@ def _page_id(arguments: dict[str, Any]) -> int | None:
     value = arguments.get("pageId")
     if value is None:
         return None
+    if isinstance(value, bool):
+        raise ToolError("pageId must be a positive integer from list_pages.")
     try:
-        return int(value)
-    except (TypeError, ValueError):
-        raise ToolError(f"pageId must be a number from list_pages, not {value!r}.") from None
+        page_id = int(value)
+        if page_id < 1 or float(value) != page_id:
+            raise ValueError
+        return page_id
+    except (TypeError, ValueError, OverflowError):
+        raise ToolError("pageId must be a positive integer from list_pages.") from None
 
 
 class BrowserTools:
@@ -906,6 +912,28 @@ class BrowserTools:
             if not result.get("attached"):
                 raise ToolError("The element is no longer attached or the selector has no matches. Take a new snapshot.")
             return ToolOutput(["## Element inspection\n" + json.dumps(result, ensure_ascii=False, indent=2)])
+        finally:
+            await self._release_dom_target(session, object_id)
+
+    async def _tool_inspect_web_chat(self, arguments: dict[str, Any]) -> ToolOutput:
+        """Run one fixed, read-only inspection on an explicitly targeted page."""
+        _page_id_value, session = await self._page(arguments, "inspect_web_chat")
+        target = await evaluate_fixed(session, "globalThis", return_by_value=False)
+        object_id = (target.get("result") or {}).get("objectId")
+        if not object_id:
+            raise ToolError("The page is not ready for web-chat inspection.")
+        try:
+            result = await session.send("Runtime.callFunctionOn", {
+                "objectId": object_id,
+                "functionDeclaration": WEB_CHAT_INSPECTION,
+                "returnByValue": True,
+            }, timeout=5.0)
+            if result.get("exceptionDetails"):
+                raise ToolError(_exception_text(result["exceptionDetails"]))
+            value = (result.get("result") or {}).get("value")
+            if not isinstance(value, dict):
+                raise ToolError("The fixed web-chat inspection returned no page metadata.")
+            return ToolOutput([json.dumps(value, ensure_ascii=False)])
         finally:
             await self._release_dom_target(session, object_id)
 

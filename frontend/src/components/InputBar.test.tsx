@@ -62,6 +62,85 @@ describe('InputBar model picker', () => {
     expect(onSend).toHaveBeenCalledTimes(1)
   })
 
+  it('sends through a selected web-chat page even when the configured model is unavailable', async () => {
+    const onSend = vi.fn()
+    const catalog = { providers: [{
+      id: 'gemini' as const, label: 'Google', models: ['remote:model'],
+      labels: { 'remote:model': 'My model' }, available: false,
+      unavailable_reason: 'Add credentials in Settings.', reasoning_efforts: { 'remote:model': [] },
+    }] }
+    render(<InputBar
+      onSend={onSend}
+      onStop={vi.fn()}
+      isStreaming={false}
+      conversationId={null}
+      contextRefreshKey={0}
+      approvalMode="default"
+      onApprovalModeChange={vi.fn()}
+      modelOptions={catalog}
+      onModelSelectionChange={vi.fn()}
+      modelSelection={{ provider: 'gemini', model_name: 'remote:model', reasoning_effort: 'medium' }}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reasoning engine' }))
+    fireEvent.click(screen.getByRole('option', { name: 'ChatGPT website' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Chrome page ID' }), { target: { value: '17' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Use ChatGPT' } })
+    expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      'Use ChatGPT', [], { provider: 'chatgpt', pageId: 17 },
+    ))
+  })
+
+  it('locks the selected web-chat provider and Chrome page for the lifetime of a running task', () => {
+    const common = {
+      onSend: vi.fn(),
+      onStop: vi.fn(),
+      conversationId: null,
+      contextRefreshKey: 0,
+      approvalMode: 'default' as const,
+      onApprovalModeChange: vi.fn(),
+      modelOptions: FALLBACK_MODEL_OPTIONS,
+      onModelSelectionChange: vi.fn(),
+      modelSelection: { provider: 'openai' as const, model_name: 'gpt-6-luna', reasoning_effort: 'medium' as const },
+    }
+    const { rerender } = render(<InputBar {...common} isStreaming={false} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Reasoning engine' }))
+    fireEvent.click(screen.getByRole('option', { name: 'ChatGPT website' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Chrome page ID' }), { target: { value: '17' } })
+
+    rerender(<InputBar {...common} isStreaming />)
+    expect(screen.getByRole('button', { name: 'Reasoning engine' })).toBeDisabled()
+    expect(screen.getByRole('spinbutton', { name: 'Chrome page ID' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Reasoning engine' })).toHaveAttribute(
+      'title',
+      'The reasoning engine is fixed for the active task. Stop it before switching providers.',
+    )
+  })
+
+  it('allows automatic provider-tab discovery without a manual Chrome page ID', () => {
+    const onSend = vi.fn()
+    render(<InputBar
+      onSend={onSend}
+      onStop={vi.fn()}
+      isStreaming={false}
+      conversationId={null}
+      contextRefreshKey={0}
+      approvalMode="default"
+      onApprovalModeChange={vi.fn()}
+      modelOptions={FALLBACK_MODEL_OPTIONS}
+      onModelSelectionChange={vi.fn()}
+      modelSelection={{ provider: 'openai', model_name: 'gpt-6-luna', reasoning_effort: 'medium' }}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: 'Reasoning engine' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Gemini website' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Use Gemini' } })
+    expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(onSend).toHaveBeenCalledWith('Use Gemini', [], { provider: 'gemini' })
+  })
+
   it.each(['modelSelectionDisabled', 'approvalModeDisabled'] as const)('waits for %s settings to save before sending', (savingProp) => {
     const onSend = vi.fn()
     const props = {

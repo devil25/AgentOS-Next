@@ -307,10 +307,12 @@ export function normalizeDraft(
       max_turn_seconds: clampInteger(settings.llm.max_turn_seconds, 7200, 30, 14400),
       max_llm_call_seconds: clampInteger(settings.llm.max_llm_call_seconds, 600, 30, 1800),
       max_tokens_per_turn: clampInteger(settings.llm.max_tokens_per_turn, DEFAULT_MAX_TOKENS_PER_TURN, 0, 100_000_000),
+      compatible_base_url: settings.llm.compatible_base_url ?? '',
       custom_models: {
         openai: settings.llm.custom_models?.openai ?? [],
         codex: settings.llm.custom_models?.codex ?? [],
         gemini: settings.llm.custom_models?.gemini ?? [],
+        openai_compatible: settings.llm.custom_models?.openai_compatible ?? [],
       },
     },
     permissions: settings.permissions.mode === 'custom'

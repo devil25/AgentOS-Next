@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_PAGE_ID = {"type": "number", "description": "Required target page ID from list_pages or new_page. Always pass it explicitly, including after select_page."}
+_PAGE_ID = {"type": "integer", "minimum": 1, "description": "Required positive target page ID from list_pages or new_page. Always pass it explicitly, including after select_page."}
 _UID = {"type": "string", "description": "The uid of an element on the page from the page content snapshot"}
 _SELECTOR = {"type": "string", "maxLength": 1000, "description": "CSS selector for one element in the main document. Use observed IDs/attributes; multiple matches are an error. Prefer uid for elements in snapshots or frames."}
 _TIMEOUT = {
@@ -292,6 +292,12 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         }, ["pageId", "function"]),
         "readOnly": False,
+    },
+    {
+        "name": "inspect_web_chat",
+        "description": "Fixed read-only inspection of a supported signed-in web-chat page. Returns visible assistant messages only when the page exposes stable message IDs; never executes caller-supplied JavaScript or reads credentials.",
+        "inputSchema": _schema({"pageId": _PAGE_ID}, ["pageId"]),
+        "readOnly": True,
     },
     {
         "name": "list_console_messages",

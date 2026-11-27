@@ -144,6 +144,19 @@ function Start-NpmScriptHidden {
     $npm = (Get-Command npm -ErrorAction Stop).Source
   }
 
+  if ($ScriptName -eq 'dev:electron') {
+    # The Electron executable can be installed even when npm's .bin shim is
+    # missing or broken. Launch the verified binary directly instead of
+    # relying on PATH resolution of the "electron" command.
+    $electronExe = Join-Path $frontendDir 'node_modules\electron\dist\electron.exe'
+    if (-not (Test-Path -LiteralPath $electronExe)) {
+      throw "Electron executable was not found: $electronExe. Run setup.bat to restore frontend dependencies."
+    }
+    $stderrLogPath = "$LogPath.stderr"
+    # Electron owns the interactive desktop window; do not inherit a hidden startup state.
+    return Start-Process -FilePath $electronExe -ArgumentList @('.') -WorkingDirectory $frontendDir -RedirectStandardOutput $LogPath -RedirectStandardError $stderrLogPath -WindowStyle Normal -PassThru
+  }
+
   $extraArgs = if ($ScriptName -eq 'dev:vite') { ' -- --port {0} --strictPort' -f $vitePort } else { '' }
   $command = 'cd /d "{0}" && "{1}" run {2}{3} > "{4}" 2>&1' -f $frontendDir, $npm, $ScriptName, $extraArgs, $LogPath
   return Start-Process -FilePath $env:ComSpec -ArgumentList @('/d', '/s', '/c', $command) -WindowStyle Hidden -PassThru
@@ -214,7 +227,7 @@ try {
   $electronProcess = Start-NpmScriptHidden -ScriptName 'dev:electron' -LogPath $electronLog
   Wait-ForEndpoint -Name 'Backend' -Url $backendHealthUrl -TimeoutSeconds 90 -Process $electronProcess
 
-  Write-Host "Monaw Agent started successfully. Logs: $launcherLogDir"
+  Write-Host "AgentOS-Next started successfully. Logs: $launcherLogDir"
   Hide-ConsoleIfExplorerLaunched
   exit 0
 } catch {
