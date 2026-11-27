@@ -136,8 +136,23 @@ class ChromeWebChatBrowserPort:
         self.resolved_page_id = tab_id
         value = self._decode_json(await self._call("inspect_web_chat", {"pageId": tab_id}))
         url = normalize_provider_url(str(value.get("url") or ""))
-        if provider_for_url(url) is None:
-            raise WebChatAdapterError(str(value.get("blockedReason") or "The selected tab is not a supported HTTPS provider."))
+        detected_provider = provider_for_url(url)
+        if detected_provider is None:
+            # Include only the inspected page URL (without query/fragment) so a
+            # wrong-tab/context mapping is diagnosable without exposing URL tokens.
+            from urllib.parse import urlsplit, urlunsplit
+            parsed = urlsplit(url)
+            safe_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")) or "(empty URL)"
+            reason = str(value.get("blockedReason") or "The selected tab is not a supported HTTPS provider.")
+            raise WebChatAdapterError(f"{reason} Inspected page URL: {safe_url}")
+        if self.provider is not None and detected_provider != self.provider:
+            from urllib.parse import urlsplit, urlunsplit
+            parsed = urlsplit(url)
+            safe_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")) or "(empty URL)"
+            raise WebChatAdapterError(
+                f"Selected ChatGPT tab mismatch: expected {self.provider}, detected {detected_provider}. "
+                f"Inspected page URL: {safe_url}"
+            )
         messages = tuple(
             AssistantMessage(
                 message_id=str(item.get("message_id") or ""),
