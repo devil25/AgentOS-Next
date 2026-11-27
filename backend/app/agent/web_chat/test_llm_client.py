@@ -311,3 +311,63 @@ def test_web_chat_client_rejects_mismatched_durable_run():
     )
     with pytest.raises(RuntimeError, match="does not match"):
         client.bind_durable_run(SimpleNamespace(run_id="different-run"))
+
+
+def test_web_chat_catalog_is_bounded_and_prioritizes_task_relevant_tools():
+    from app.agent.web_chat.llm_client import (
+        WEB_CHAT_TOOL_CATALOG_MAX_BYTES,
+        _select_web_chat_tool_catalog,
+    )
+
+    tools = [
+        {
+            "name": f"unrelated.tool_{index}",
+            "description": "Large unrelated description " * 200,
+            "parameters": {"type": "object", "properties": {"unused": {"type": "string", "description": "x" * 200}}},
+        }
+        for index in range(80)
+    ]
+    tools.append({
+        "name": "terminal.execute",
+        "description": "Run a PowerShell command in the terminal",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string", "description": "Command to execute"}},
+            "required": ["command"],
+        },
+    })
+
+    catalog = _select_web_chat_tool_catalog(tools, "Run a PowerShell command")
+    encoded = __import__("json").dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+    assert len(encoded.encode("utf-8")) <= WEB_CHAT_TOOL_CATALOG_MAX_BYTES
+    assert catalog[0]["name"] == "terminal.execute"
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_handles_large_global_catalog_by_sending_relevant_subset():
+    adapter = FakeAdapter([action()])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    tools = [
+        {
+            "name": f"unrelated.tool_{index}",
+            "description": "Unrelated long description " * 100,
+            "parameters": {"type": "object", "properties": {"unused": {"type": "string"}}},
+        }
+        for index in range(100)
+    ]
+    tools.append({
+        "name": "terminal.execute",
+        "description": "Run a PowerShell command",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    })
+    response = await client.chat_with_tools(
+        messages=[{"role": "user", "content": "Run a PowerShell command"}],
+        tools=tools,
+    )
+    assert response.finish_reason == "tool_calls"
+    assert "terminal.execute" in adapter.prompts[0][1]
+    assert "unrelated.tool_99" not in adapter.prompts[0][1]
