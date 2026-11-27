@@ -757,10 +757,10 @@ async function inspectEmbeddedAccessibilityMessages() {
       ].join(' ').toLowerCase()
       // Avoid generic "user"/"assistant" matches: those labels also occur in
       // composer and navigation accessibility contexts.
-      const hasExplicitUserContext = /\\b(you said|your message|user message|from you)\\b/i.test(contextHint)
-      const hasExplicitAssistantContext = /\\b(chatgpt said|assistant response|from chatgpt)\\b/i.test(contextHint)
-      const hasAssistantControls = controls.some(label => /\\b(copy|read aloud|good response|bad response|regenerate|retry|share response)\\b/i.test(label))
-      const hasUserControls = controls.some(label => /\\b(edit message|edit your message)\\b/i.test(label))
+      const hasExplicitUserContext = /\b(you said|your message|user message|from you)\b/i.test(contextHint)
+      const hasExplicitAssistantContext = /\b(chatgpt said|assistant response|from chatgpt)\b/i.test(contextHint)
+      const hasAssistantControls = controls.some(label => /\b(copy|read aloud|good response|bad response|regenerate|retry|share response)\b/i.test(label))
+      const hasUserControls = controls.some(label => /\b(edit message|edit your message)\b/i.test(label))
       const messageRole = hasUserControls || hasExplicitUserContext ? 'user'
         : hasAssistantControls || hasExplicitAssistantContext ? 'assistant' : ''
       if (!messageRole) continue
