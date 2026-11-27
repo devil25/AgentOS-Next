@@ -5,7 +5,6 @@ import { ChatWindow } from './components/ChatWindow'
 import { InputBar } from './components/InputBar'
 import { ApprovalToast } from './components/ApprovalToast'
 import { EmbeddedBrowserPanel } from './components/EmbeddedBrowserPanel'
-import { Globe } from 'lucide-react'
 import { AccessGrantCard } from './components/AccessGrantCard'
 import { ExecutionTimeline } from './components/ExecutionTimeline'
 import { RecoveryPanel } from './components/RecoveryPanel'
@@ -666,14 +665,7 @@ export default function App() {
         status={!isBackendReady ? 'starting' : isStreaming ? 'working' : 'ready'}
         approvalMode={approvalMode}
         onOpenPermissions={() => openSettings('permissions')}
-        actions={
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setShowEmbeddedBrowser(true)}
-              className="no-drag inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-500/30 px-2 text-xs text-emerald-200 hover:bg-emerald-500/10"
-              aria-label="Open embedded browser" title="Open embedded browser">
-              <Globe size={14} /> Browser
-            </button>
-          {activeConvId && <ChangesReview key={activeConvId} conversationId={activeConvId} runs={runController.runs} snapshot={runController.snapshot}
+        actions={{activeConvId && <ChangesReview key={activeConvId} conversationId={activeConvId} runs={runController.runs} snapshot={runController.snapshot}
           legacyUndo={(() => {
                 const run = runController.snapshot
                 const lastMessage = messages[messages.length - 1]
@@ -690,9 +682,8 @@ export default function App() {
                   </details>
                 )
               })()}
-          />
-          </div>
-        }
+          />}}
+        onOpenBrowser={() => setShowEmbeddedBrowser(true)}
       />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
