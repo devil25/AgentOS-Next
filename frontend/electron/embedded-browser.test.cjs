@@ -97,7 +97,7 @@ test('ChatGPT response capture uses a bounded single-call accessibility fallback
   const capture = main.slice(start, end)
   assert.match(capture, /Accessibility\.getFullAXTree/)
   assert.match(capture, /maxDepth: 20/)
-  assert.match(capture, /Accessibility snapshot exceeded its 3\\.5s budget/)
+  assert.match(capture, /Accessibility snapshot exceeded its 3\.5s budget/)
   assert.match(capture, /Promise\.race/)
   assert.match(capture, /slice\(0, 4000\)/)
   assert.match(capture, /messages\.length >= 100/)
