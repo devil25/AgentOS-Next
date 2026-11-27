@@ -792,7 +792,7 @@ function startEmbeddedBrowserBridge() {
             snapshot.accessibilityNodeCount = accessibility.nodeCount
             const domMessages = Array.isArray(snapshot.messages) ? snapshot.messages : []
             const messageKey = item => String(item?.role || '') + ':' +
-              String(item?.text || '').replace(/\\s+/g, ' ').trim()
+              String(item?.text || '').replace(/\s+/g, ' ').trim()
             const accessibleByText = new Map(
               accessibility.messages.map(item => [messageKey(item), item])
             )
