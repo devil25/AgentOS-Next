@@ -185,9 +185,9 @@ class WebChatLLMClient:
                         "Use the latest captured user/assistant exchange below to answer the ORIGINAL "
                         "AgentOS request. Do not repeat the read or call embedded_browser_conversation "
                         "again unless a new browser action changed the page. If the capture contains no "
-                        "assistant text or pageText, state that limitation clearly.\\n\\n"
-                        "Original AgentOS request:\\n" + goal[:6000] + "\\n\\n"
-                        "Bounded browser evidence:\\n" + result_text[:30000]
+                        "assistant text or pageText, state that limitation clearly.\n\n"
+                        "Original AgentOS request:\n" + goal[:6000] + "\n\n"
+                        "Bounded browser evidence:\n" + result_text[:30000]
                     )
                 else:
                     prompt = (
