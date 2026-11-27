@@ -3,27 +3,27 @@ import pytest
 from app.agent.explicit_tool_scope import explicit_tool_scope, filter_tool_calls
 
 
-@pytest.mark.parametrize("request,allowed", [
+@pytest.mark.parametrize("user_text,allowed", [
     ("Use the tool `list_pages` only.", "list_pages"),
     ("Use `list_pages` only; do not call anything else.", "list_pages"),
     ("Only use tool `list_pages`.", "list_pages"),
     ("استخدم أداة `list_pages` فقط.", "list_pages"),
     ("نفّذ `list_pages` فقط.", "list_pages"),
 ])
-def test_explicit_single_tool_scope_is_detected(request, allowed):
-    scope = explicit_tool_scope(request)
+def test_explicit_single_tool_scope_is_detected(user_text, allowed):
+    scope = explicit_tool_scope(user_text)
     assert scope is not None
     assert scope.allowed_tool == allowed
 
 
-@pytest.mark.parametrize("request", [
+@pytest.mark.parametrize("user_text", [
     "List the open Chrome pages.",
     "Use list_pages and then inspect the page.",
     "Do not use list_pages.",
     "Use the browser carefully.",
 ])
-def test_no_scope_is_inferred_without_an_explicit_only_restriction(request):
-    assert explicit_tool_scope(request) is None
+def test_no_scope_is_inferred_without_an_explicit_only_restriction(user_text):
+    assert explicit_tool_scope(user_text) is None
 
 
 def test_scope_matches_namespaced_mcp_tool_names_without_allowing_other_tools():
@@ -33,7 +33,6 @@ def test_scope_matches_namespaced_mcp_tool_names_without_allowing_other_tools():
     assert scope.allows("mcp__chrome_devtools__list_pages")
     assert not scope.allows("inspect_web_chat")
     assert not scope.allows("mcp__chrome_devtools__inspect_web_chat")
-
 
 
 def test_only_allowed_tool_is_retained_and_extra_calls_are_blocked_before_dispatch():
