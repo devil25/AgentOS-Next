@@ -111,6 +111,8 @@ class EmbeddedWebChatBrowserPort:
         for item in elements:
             if not isinstance(item, dict) or item.get("disabled") is True:
                 continue
+            if str(item.get("tag") or "").lower() != "button" and str(item.get("role") or "").lower() != "button":
+                continue
             label = " ".join(str(item.get(key) or "") for key in ("label", "text", "placeholder")).strip()
             if pattern.search(label):
                 index = item.get("index")
