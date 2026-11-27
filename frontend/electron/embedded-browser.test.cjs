@@ -91,15 +91,17 @@ test('embedded ChatGPT conversation detection has safe fallbacks and precise gen
   assert.doesNotMatch(main, /document\.querySelector\('\[aria-busy="true",\[data-testid\*="stop"/)
 })
 
-test('ChatGPT response capture falls back to Chromium accessibility tree when DOM markers disappear', () => {
-  assert.match(main, /Accessibility\.getFullAXTree/)
-  assert.match(main, /DOM\.resolveNode/)
-  assert.match(main, /Runtime\.callFunctionOn/)
+test('ChatGPT response capture uses a bounded single-call accessibility fallback', () => {
+  const start = main.indexOf('async function inspectEmbeddedAccessibilityMessages')
+  const end = main.indexOf('function startEmbeddedBrowserBridge', start)
+  const capture = main.slice(start, end)
+  assert.match(capture, /Accessibility\.getFullAXTree/)
+  assert.match(capture, /slice\(0, 4000\)/)
+  assert.match(capture, /messages\.length >= 100/)
+  assert.doesNotMatch(capture, /DOM\.resolveNode|Runtime\.callFunctionOn/)
+  assert.match(capture, /chatgpt said/)
   assert.match(main, /snapshot\.captureSource = snapshot\.messages\.length \? 'accessibility_tree' : 'none'/)
   assert.match(main, /inspectEmbeddedAccessibilityMessages\(\)/)
-  assert.match(main, /data-message-author-role/)
-  assert.match(main, /chatgpt said/)
-  assert.match(main, /A stale AX backend node is skipped/)
 })
 
 test('ChatGPT Enter submits through the enabled Send button when available', () => {
