@@ -28,8 +28,8 @@ unauthenticated runtime endpoint.
 | `POST` | `/api/chat/steer` | `agent:run` | `ChatSteerResponse` |
 | `POST` | `/api/chat/stop` | `agent:run` | `OkResponse` |
 | `GET` | `/api/conversations` | `agent:run` | `list` |
-| `GET` | `/api/conversations/trash` | `agent:run` | `list` |
 | `POST` | `/api/conversations` | `agent:run` | `ConversationOut` |
+| `GET` | `/api/conversations/trash` | `agent:run` | `list` |
 | `POST` | `/api/conversations/workspace-validation` | `agent:run` | `ConversationWorkspace` |
 | `DELETE` | `/api/conversations/{conv_id}` | `agent:run` | `stream/file/none` |
 | `PATCH` | `/api/conversations/{conv_id}` | `agent:run` | `ConversationOut` |
