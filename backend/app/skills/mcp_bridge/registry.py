@@ -375,6 +375,17 @@ def _blocked_scope(reason: str) -> str:
 def _browser_context(manager, tool_name: str, arguments: dict, upload_scope=None) -> dict:
     response = json.loads(manager.call_tool_sync("__monaw_action_context", {"tool_name": tool_name, "arguments": arguments,
                                                                           "upload_scope": upload_scope}))
+    if response.get("is_error"):
+        content = response.get("content") or []
+        details = [
+            str(item.get("text") or "").strip()
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text")
+        ]
+        # Preserve the trusted browser adapter's actionable connection/runtime
+        # error instead of replacing it with a generic missing-context message.
+        message = "; ".join(details)[:1000] or "Browser runtime context could not be established."
+        raise ValueError(message)
     context = (response.get("structured_content") or response.get("structuredContent") or {}).get("browser_action_context")
     if not isinstance(context, dict) or not context.get("context_token"):
         raise ValueError("browser_runtime_context_unavailable")
