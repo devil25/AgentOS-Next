@@ -27,6 +27,7 @@ async def test_embedded_port_inspects_structured_chatgpt_conversation_through_to
             ],
             "composerReady": True,
             "generating": False,
+            "contextLimit": True,
             "loginRequired": False,
             "blockedReason": "",
         })
@@ -38,6 +39,7 @@ async def test_embedded_port_inspects_structured_chatgpt_conversation_through_to
     assert port.resolved_page_id == 1
     assert snapshot.url == "https://chatgpt.com/c/abc"
     assert snapshot.composer_ready is True
+    assert snapshot.context_limit is True
     assert [message.role for message in snapshot.messages] == ["user", "assistant"]
 
 
