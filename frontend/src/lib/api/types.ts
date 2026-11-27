@@ -168,7 +168,7 @@ export type WebChatProvider = 'chatgpt' | 'gemini' | 'deepseek' | 'zai'
 
 export interface WebChatTarget {
   provider: WebChatProvider
-  pageId: number
+  pageId?: number
 }
 
 export interface UploadedAttachment {
