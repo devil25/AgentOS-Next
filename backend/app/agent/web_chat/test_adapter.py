@@ -93,6 +93,23 @@ async def test_turn_stops_polling_when_provider_claims_generation_without_any_me
 
 
 @pytest.mark.anyio
+async def test_turn_classifies_explicit_provider_context_limit_without_retrying():
+    from app.agent.web_chat.adapter import WebChatContextLimitError
+
+    old = AssistantMessage("old", "Earlier response", True)
+    limit = AssistantMessage("limit", "This conversation is too long. Start a new chat.", True)
+    browser = FakeBrowser([
+        snapshot([old]),
+        snapshot([old, limit]),
+        snapshot([old, limit]),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=2)
+    with pytest.raises(WebChatContextLimitError, match="context limit"):
+        await adapter.send_and_wait(tab_id=12, prompt="Continue", expected_provider="chatgpt")
+    assert browser.submitted == [(12, "Continue")]
+
+
+@pytest.mark.anyio
 async def test_turn_rejects_conversation_switch_after_submission():
     old = AssistantMessage("old", "Earlier response", True)
     browser = FakeBrowser([
