@@ -456,7 +456,7 @@ async def test_web_chat_client_stops_consecutive_identical_conversation_reads_wi
     assert first.finish_reason == "tool_calls"
     result_one = {
         "role": "user",
-        "content": "AgentOS tool result for embedded_browser_conversation: {\\\"captureSource\\\":\\\"visible_page_text_fallback\\\",\\\"pageText\\\":\\\"answer\\\"}",
+        "content": "AgentOS tool result for embedded_browser_conversation: captureSource=visible_page_text_fallback; pageText=answer",
         "tool_result": True,
         "web_chat_action_result": True,
     }
