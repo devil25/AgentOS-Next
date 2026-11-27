@@ -11,6 +11,8 @@ tier: internal
 
 Use these tools for website fetching and browser automation tasks.
 
+**Explicit user scope takes precedence over this workflow.** If the user names an exact tool or says to use one tool only (for example, `list_pages` only), call only that tool. Do not continue to the next workflow step, inspect the returned page, select a tab, or invoke a helper tool unless the user explicitly permits it. Once the requested tool returns, stop and report its result. If it fails, report the original error and stop; do not switch tools, retry, or attempt an automatic recovery unless the user authorizes that.
+
 Tools:
 - Interactive browsing uses the browser tools (`mcp__chrome-devtools__*`). They drive the user's own Chrome profile through the Monaw Chrome extension; the first call opens Chrome if needed. Never tell the user to configure debugging ports or launch Chrome manually. If a tool says the extension is not set up or not connected, pass that on to the user instead of retrying.
 - For read-only URL retrieval, extraction, or summarization, use `browser_fetch` instead of opening a tab. It is a plain HTTP fetch with no JavaScript. If it returns `status: "needs_browser_render"` (an empty, script-only, or bot-blocked page), open the URL with `mcp__chrome-devtools__new_page` or `navigate_page` and read it with `take_snapshot`.
