@@ -172,7 +172,7 @@ class WebChatLLMClient:
             )
             latest_user = next(
                 (item for item in reversed(messages)
-                 if isinstance(item, dict) and item.get("role") == "user" and not item.get("tool_result")),
+                 if isinstance(item, dict) and item.get("role") == "user" and not item.get("tool_result") and not item.get("agentos_internal_context")),
                 None,
             )
             goal = str((latest_user or {}).get("content") or "").strip()
