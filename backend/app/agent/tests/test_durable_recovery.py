@@ -317,8 +317,11 @@ def test_dispatch_guard_allows_only_list_pages_through_quarantined_shared_worksp
     blocked = _create_run(
         journal, owner=old_owner, run_id="guard-uncertain",
         turn_id="guard-uncertain-turn", conversation_id="guard-uncertain-chat",
-        workspace_dir=workspace,
+        workspace_dir=str(tmp_path / "isolated-old-workspace"),
     )
+    db.update_conversation("guard-uncertain-chat", workspace_dir=workspace)
+    db.execute("UPDATE agent_runs SET workspace_dir=? WHERE run_id=?", (workspace, "guard-uncertain"))
+    db.commit()
     operation = journal.prepare_operation(
         "guard-uncertain", operation_id="guard-opaque-write",
         owner_instance_id=old_owner, attempt=int(blocked["attempt"]),
@@ -352,7 +355,8 @@ def test_dispatch_guard_allows_only_list_pages_through_quarantined_shared_worksp
     )
     assert page_inventory is not None
     assert page_inventory.effect_class == "read_only"
-    page_inventory.return_result({"pages": []})
+    page_inventory.begin_effect()
+    page_inventory.settle('{"pages": []}')
 
     with pytest.raises(DispatchConflictError, match="another durable run"):
         assert_run_dispatch_allowed(
