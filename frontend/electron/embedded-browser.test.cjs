@@ -132,6 +132,9 @@ test('ChatGPT Enter confirms submission by observing the composer clear', () => 
   assert.match(main, /submissionVerified: true/)
   assert.match(main, /chatgpt_submission_unconfirmed/)
   assert.match(main, /composerEmpty: Boolean\(composer\) && !value/)
+  assert.match(main, /submittedTextPrefix: text\.slice\(0, 160\)/)
+  assert.match(main, /visiblePageText\.includes\(expectedPrefix\)/)
+  assert.match(main, /state\?\.userMessageVisible/)
 })
 
 test('ChatGPT accessibility capture excludes editable composer subtrees and weak role hints', () => {
