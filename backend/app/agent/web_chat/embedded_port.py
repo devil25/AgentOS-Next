@@ -5,7 +5,9 @@ this port never attaches to Chrome, reads browser storage, or executes page scri
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from typing import Any, Awaitable, Callable
 
 from .adapter import AssistantMessage, ConversationSnapshot, WebChatAdapterError
@@ -92,6 +94,47 @@ class EmbeddedWebChatBrowserPort:
             generating=bool(payload.get("generating")),
             login_required=bool(payload.get("loginRequired")),
             blocked_reason=str(payload.get("blockedReason") or ""),
+        )
+
+    async def start_new_conversation(self) -> str:
+        """Use the provider's visible New chat control and verify the empty composer."""
+        before = await self._call("embedded_browser_conversation")
+        before_url = str(before.get("url") or "")
+        snapshot = await self._call("embedded_browser_snapshot")
+        elements = snapshot.get("elements") if isinstance(snapshot.get("elements"), list) else []
+        pattern = re.compile(
+            r"^(?:new chat|new conversation|start new chat|new thread|محادثة جديدة|بدء محادثة)(?:\\b|\\s|$)",
+            re.IGNORECASE,
+        )
+        matches = []
+        for item in elements:
+            if not isinstance(item, dict) or item.get("disabled") is True:
+                continue
+            label = " ".join(str(item.get(key) or "") for key in ("label", "text", "placeholder")).strip()
+            if pattern.search(label):
+                index = item.get("index")
+                if isinstance(index, int) and not isinstance(index, bool) and index >= 0:
+                    matches.append(index)
+        if len(matches) != 1:
+            raise WebChatAdapterError(
+                "Could not identify exactly one visible New chat control. No provider navigation was attempted."
+            )
+        await self._call("embedded_browser_click", {"index": matches[0]})
+        deadline = asyncio.get_running_loop().time() + 12.0
+        while asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.25)
+            current = await self._call("embedded_browser_conversation")
+            url = str(current.get("url") or "")
+            messages = current.get("messages") if isinstance(current.get("messages"), list) else []
+            if (
+                provider_for_url(url) == self.provider
+                and bool(current.get("composerReady"))
+                and not messages
+                and (url != before_url or not before.get("messages"))
+            ):
+                return url
+        raise WebChatAdapterError(
+            "The provider New chat control was activated, but a fresh empty conversation was not confirmed."
         )
 
     async def submit(self, tab_id: int, text: str) -> None:
