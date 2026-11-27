@@ -21,7 +21,7 @@ _WEB_CHAT_TOOL_DESCRIPTION_MAX_CHARS = 480
 def _web_chat_tokens(value: str) -> set[str]:
     import re
 
-    return {token for token in re.findall(r"[a-z0-9_]+|[\\u0600-\\u06ff]+", str(value or "").casefold()) if len(token) > 1}
+    return {token for token in re.findall(r"[a-z0-9_]+|[\u0600-\u06ff]+", str(value or "").casefold()) if len(token) > 1}
 
 
 def _compact_json_schema(value: Any, *, depth: int = 0) -> Any:
@@ -88,7 +88,6 @@ def _select_web_chat_tool_catalog(tools: list[dict], goal: str) -> list[dict]:
             continue
         selected.append(entry)
         used += size
-    selected.sort(key=lambda entry: next((i for i, tool in enumerate(tools) if isinstance(tool, dict) and str(tool.get("name") or "") == entry["name"]), len(tools)))
     return selected
 
 
