@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.web_chat.llm_client import WebChatLLMClient
+from app.agent.web_chat.adapter import WebChatContextLimitError
 from app.agent.harness.tool_runner import ToolBatchRunner
 from app.agent.harness.turn_transcript import TurnTranscript
 from app.agent.harness.tool_protocol import ToolCallResult
@@ -15,14 +16,24 @@ class FakeAdapter:
         self.replies = list(replies)
         self.prompts = []
         self.expected_urls = []
+        self.new_chat_calls = 0
 
     async def send_and_wait(self, *, tab_id, prompt, expected_provider, expected_conversation_url=""):
         self.prompts.append((tab_id, prompt, expected_provider))
         self.expected_urls.append(expected_conversation_url)
+        reply = self.replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        default_url = "https://chatgpt.com/c/task-123" if expected_provider == "chatgpt" else "https://chat.z.ai/c/task-123"
         return SimpleNamespace(
-            assistant_message=SimpleNamespace(text=self.replies.pop(0)),
-            conversation_url="https://chatgpt.com/c/task-123" if expected_provider == "chatgpt" else "https://chat.z.ai/c/task-123",
+            assistant_message=SimpleNamespace(text=reply),
+            conversation_url=expected_conversation_url or default_url,
+            tab_id=tab_id,
         )
+
+    async def start_new_conversation(self):
+        self.new_chat_calls += 1
+        return "https://chatgpt.com/c/fresh-task"
 
 
 def action():
@@ -58,6 +69,48 @@ async def test_web_chat_client_returns_tool_call_for_existing_turn_loop():
     assert response.tool_calls[0].arguments == {"command": "Get-Date"}
     assert "terminal.execute" in adapter.prompts[0][1]
     assert adapter.prompts[0][0] == 42
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_rolls_over_once_and_hands_off_goal_and_real_tool_results():
+    adapter = FakeAdapter([
+        WebChatContextLimitError("The provider explicitly reported its context limit."),
+        "The remaining task is complete.",
+    ])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    result_message = {
+        "role": "user", "content": "AgentOS tool result: created report.pdf",
+        "tool_result": True, "web_chat_action_result": True,
+    }
+    response = await client.chat_with_tools(
+        messages=[{"role": "user", "content": "Create a report and verify it"}, result_message],
+        tools=[],
+        system_prompt="Task progress: report creation verified; verification remains pending.",
+    )
+    assert response.content == "The remaining task is complete."
+    assert adapter.new_chat_calls == 1
+    assert len(adapter.prompts) == 2
+    handoff = adapter.prompts[1][1]
+    assert "Create a report and verify it" in handoff
+    assert "report creation verified" in handoff
+    assert "created report.pdf" in handoff
+    assert "Do not restart completed work" in handoff
+    assert adapter.expected_urls == ["", "https://chatgpt.com/c/fresh-task"]
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_does_not_roll_over_twice_for_repeated_context_limit():
+    adapter = FakeAdapter([
+        WebChatContextLimitError("limit one"),
+        WebChatContextLimitError("limit two"),
+    ])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    with pytest.raises(WebChatContextLimitError):
+        await client.chat_with_tools(
+            messages=[{"role": "user", "content": "Continue task"}], tools=[],
+        )
+    assert adapter.new_chat_calls == 1
+    assert len(adapter.prompts) == 2
 
 
 @pytest.mark.anyio
