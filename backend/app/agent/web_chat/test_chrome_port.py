@@ -87,3 +87,38 @@ def test_fixed_web_chat_inspection_is_read_only_and_never_reads_credentials():
     assert "localStorage" not in WEB_CHAT_INSPECTION
     assert "sessionStorage" not in WEB_CHAT_INSPECTION
     assert "eval(" not in WEB_CHAT_INSPECTION
+
+
+@pytest.mark.anyio
+async def test_automatic_discovery_selects_the_only_matching_provider_tab():
+    executor = FakeAuthorizedToolExecutor([
+        {"content": [{"type": "text", "text": "## Pages\\n1: Gmail (https://mail.google.com/)\\n4: ChatGPT (https://chatgpt.com/c/example) [selected]"}]},
+        {
+            "url": "https://chatgpt.com/c/example",
+            "title": "ChatGPT",
+            "messages": [],
+            "composerReady": True,
+            "generating": False,
+            "loginRequired": False,
+            "blockedReason": "",
+        },
+    ])
+    port = ChromeWebChatBrowserPort(executor, provider="chatgpt")
+    snapshot = await port.inspect(None)
+    assert snapshot.url == "https://chatgpt.com/c/example"
+    assert port.resolved_page_id == 4
+    assert executor.calls == [
+        ("mcp__chrome-devtools__list_pages", {}),
+        ("mcp__chrome-devtools__inspect_web_chat", {"pageId": 4}),
+    ]
+
+
+@pytest.mark.anyio
+async def test_automatic_discovery_refuses_ambiguous_provider_tabs():
+    executor = FakeAuthorizedToolExecutor([{
+        "content": [{"type": "text", "text": "## Pages\\n2: ChatGPT one (https://chatgpt.com/c/one)\\n5: ChatGPT two (https://chatgpt.com/c/two)"}]
+    }])
+    port = ChromeWebChatBrowserPort(executor, provider="chatgpt")
+    with pytest.raises(WebChatAdapterError, match="More than one chatgpt tab"):
+        await port.inspect(None)
+    assert len(executor.calls) == 1
