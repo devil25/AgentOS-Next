@@ -122,6 +122,7 @@ TEST_GROUPS = {
     },
     "integrations": {
         "test_adapter.py",
+        "test_embedded_port.py",
         "test_chrome_port.py",
         "test_coordinator.py",
         "test_llm_client.py",
