@@ -281,8 +281,8 @@ test('background companion observations are authenticated, provider-bound, and s
   assert.match(main, /captureSource: 'extension_companion'/)
 })
 
-test('ChatGPT send confirmation uses the rendered user message, not composer clearing', () => {
-  assert.match(main, /if \(state\?\.userMessageVisible\)/)
+test('ChatGPT send confirmation uses a newly rendered user turn or assistant reply, not composer clearing', () => {
+  assert.match(main, /if \(state\?\.userMessageVisible \|\| state\?\.assistantMessageVisible\)/)
   assert.match(main, /composerEmpty: Boolean\(state\.composerEmpty\)/)
   assert.doesNotMatch(main, /if \(state\?\.composerFound && state\?\.composerEmpty && state\?\.userMessageVisible\)/)
 })

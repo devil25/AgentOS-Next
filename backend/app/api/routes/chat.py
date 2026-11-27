@@ -247,7 +247,7 @@ async def steer_chat(body: ChatSteerRequest, request: Request):
         raise HTTPException(status_code=409, detail="This turn is no longer running. Send the message as a new turn.")
     from app.agent.database import get_db
     conversation = get_db().get_conversation(inbox.conversation_id)
-    if conversation is None or conversation.get("deleted_at"):
+    if conversation is not None and conversation.get("deleted_at"):
         raise HTTPException(
             status_code=409,
             detail="This conversation is in Trash. Restore it before sending steering messages.",

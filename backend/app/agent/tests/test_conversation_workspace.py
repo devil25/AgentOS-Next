@@ -400,7 +400,7 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
         "conversation_id": "trash-chat",
     })
     assert blocked.status_code == 409
-    assert "Restore it before sending" in blocked.json()["detail"]
+    assert "Restore it before sending" in blocked.json()["message"]
 
     restored = client.post("/api/conversations/trash-chat/restore")
     assert restored.status_code == 200, restored.text

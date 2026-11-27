@@ -81,7 +81,7 @@ def generate() -> str:
             "",
             "Recovery verifies persisted state before offering Continue. It does not replay an interrupted tool call. Supported native file effects can be checked against private snapshots; Shell, Browser, MCP, and other opaque effects can remain `needs_review` until the user inspects them. A `verify` request is read-only. Run events and operation evidence are projected onto bounded public fields; file paths, file contents, snapshot references, and raw content hashes are not returned.",
             "",
-            "Run events are stored in `agent.db` and currently have no automatic age-based retention. The `410 events_expired` response means the requested sequence has a gap in the rows that remain; it is not evidence of a configured retention period. Deleting a conversation cascades its Run, operation, and event rows, while old unreferenced snapshot files are reclaimed separately by snapshot cleanup.",
+            "Run events are stored in `agent.db` and currently have no automatic age-based retention. The `410 events_expired` response means the requested sequence has a gap in the rows that remain; it is not evidence of a configured retention period. Deleting a conversation with active or unresolved Run evidence moves it to Trash without removing Run, operation, event, or snapshot evidence. Restore returns it to normal history. Permanent deletion is a separate action and remains blocked until active and unresolved Runs have been safely resolved; unreferenced snapshot files are reclaimed separately by snapshot cleanup.",
             "",
             "## File-mutation routes",
             "",
