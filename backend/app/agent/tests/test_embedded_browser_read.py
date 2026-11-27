@@ -324,6 +324,68 @@ def test_embedded_conversation_observation_cannot_repeat_forever():
 
 
 
+def test_embedded_conversation_reply_ready_requires_assistant_after_latest_user():
+    assert tools._embedded_conversation_reply_ready({
+        "messages": [
+            {"role": "user", "text": "new prompt"},
+            {"role": "assistant", "text": "completed answer"},
+        ],
+        "generating": False,
+    })
+    assert not tools._embedded_conversation_reply_ready({
+        "messages": [
+            {"role": "assistant", "text": "old answer"},
+            {"role": "user", "text": "new prompt"},
+        ],
+        "generating": False,
+    })
+    assert not tools._embedded_conversation_reply_ready({
+        "messages": [
+            {"role": "user", "text": "new prompt"},
+            {"role": "assistant", "text": "streaming answer"},
+        ],
+        "generating": True,
+    })
+
+
+@pytest.mark.anyio
+async def test_embedded_browser_conversation_waits_for_new_assistant_reply(monkeypatch):
+    calls = []
+
+    async def fake_request(_path):
+        calls.append(1)
+        if len(calls) == 1:
+            return {
+                "ok": True,
+                "provider": "chatgpt",
+                "url": "https://chatgpt.com/c/abc",
+                "messages": [{"message_id": "u2", "role": "user", "text": "new prompt"}],
+                "generating": True,
+            }
+        return {
+            "ok": True,
+            "provider": "chatgpt",
+            "url": "https://chatgpt.com/c/abc",
+            "messages": [
+                {"message_id": "u2", "role": "user", "text": "new prompt"},
+                {"message_id": "a2", "role": "assistant", "text": "completed answer"},
+            ],
+            "generating": False,
+        }
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(tools, "_embedded_browser_request", fake_request)
+    monkeypatch.setattr(tools.asyncio, "sleep", no_wait)
+    result = json.loads(await tools.embedded_browser_conversation())
+
+    assert len(calls) == 2
+    assert result["ok"] is True
+    assert result["messages"][-1]["text"] == "completed answer"
+    assert "reason_code" not in result
+
+
 @pytest.mark.anyio
 async def test_embedded_browser_conversation_keeps_only_latest_exchange_and_bounds_long_reply(monkeypatch):
     monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_PORT", "43210")
