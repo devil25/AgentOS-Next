@@ -86,6 +86,7 @@ TEST_GROUPS = {
         "test_computer_state.py",
         "test_computer_input.py",
         "test_browser_fetch.py",
+        "test_embedded_browser_read.py",
         "test_browser_extension_bridge.py",
         "test_browser_extension_install.py",
         "test_browser_extension_tools.py",

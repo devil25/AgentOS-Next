@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import os
 import re
 import ssl
 import urllib.error
@@ -544,3 +545,44 @@ def register_tools(registry, settings) -> None:
     from .registration import register_browser_tools
 
     register_browser_tools(registry, settings)
+
+
+async def embedded_browser_read(*, max_chars: int = 20000) -> str:
+    """Read visible text from the active AgentOS-Next embedded browser page."""
+    port = os.environ.get("AGENTOS_EMBEDDED_BROWSER_PORT", "").strip()
+    secret = os.environ.get("AGENTOS_EMBEDDED_BROWSER_SECRET", "")
+    if not port.isdigit() or not secret:
+        return _json_output({"ok": False, "error": "The AgentOS embedded browser bridge is not available."})
+    limit = max(500, min(int(max_chars or 20000), 20000))
+
+    def _request() -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{int(port)}/v1/inspect",
+            data=b"{}",
+            headers={
+                "Authorization": f"Bearer {secret}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read(256 * 1024).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid embedded browser response")
+        return payload
+
+    try:
+        payload = await asyncio.to_thread(_request)
+    except Exception:
+        return _json_output({"ok": False, "error": "Could not read the active AgentOS embedded browser page."})
+    text_value = str(payload.get("text") or "")
+    return _json_output({
+        "ok": True,
+        "title": str(payload.get("title") or "")[:300],
+        "url": str(payload.get("url") or "")[:4096],
+        "headings": [str(item)[:300] for item in (payload.get("headings") or [])[:30]],
+        "text": text_value[:limit],
+        "truncated": len(text_value) > limit,
+        "inspected_at": str(payload.get("inspectedAt") or ""),
+    })

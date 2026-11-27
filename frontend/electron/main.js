@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session, shell, nativeTheme, safeStorage, clipboard, Notification } = require('electron')
+const { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, shell, nativeTheme, safeStorage, clipboard, Notification } = require('electron')
 const path = require('path')
 const os = require('os')
 const { spawn, spawnSync } = require('child_process')
@@ -163,6 +163,8 @@ function spawnBackend() {
         CORS_ALLOW_ORIGIN_REGEX: '',
         AGENT_RUNTIME_DIR: process.env.AGENT_RUNTIME_DIR || runtimeDir,
         AGENT_WORKSPACE_DIR: process.env.AGENT_WORKSPACE_DIR || workspaceDir,
+        AGENTOS_EMBEDDED_BROWSER_PORT: String(embeddedBrowserBridgePort),
+        AGENTOS_EMBEDDED_BROWSER_SECRET: EMBEDDED_BROWSER_BRIDGE_SECRET,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -474,6 +476,158 @@ function applyNativeTheme(theme) {
   }
 }
 
+
+const EMBEDDED_PROVIDERS = Object.freeze({
+  chatgpt: 'https://chatgpt.com/',
+  gemini: 'https://gemini.google.com/app',
+  deepseek: 'https://chat.deepseek.com/',
+  zai: 'https://chat.z.ai/',
+})
+let embeddedBrowserView = null
+let embeddedBrowserProvider = null
+
+function embeddedSafeUrl(value) {
+  if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid browser URL')
+  let parsed
+  try { parsed = new URL(value) } catch { throw new Error('Enter a valid HTTPS URL') }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port && parsed.port !== '443') {
+    throw new Error('The embedded browser only allows secure HTTPS pages')
+  }
+  return parsed.href
+}
+
+function publishEmbeddedBrowserState(extra = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const view = embeddedBrowserView
+  const state = view && !view.webContents.isDestroyed()
+    ? { open: true, provider: embeddedBrowserProvider, url: view.webContents.getURL(), title: view.webContents.getTitle(), loading: view.webContents.isLoading(), canGoBack: view.webContents.navigationHistory.canGoBack(), canGoForward: view.webContents.navigationHistory.canGoForward(), ...extra }
+    : { open: false, provider: null, url: '', title: '', loading: false, canGoBack: false, canGoForward: false, ...extra }
+  mainWindow.webContents.send('embedded-browser:state', state)
+}
+
+function closeEmbeddedBrowser() {
+  if (!embeddedBrowserView) return
+  const view = embeddedBrowserView
+  embeddedBrowserView = null
+  embeddedBrowserProvider = null
+  try { mainWindow?.contentView.removeChildView(view) } catch {}
+  try { if (!view.webContents.isDestroyed()) view.webContents.close({ waitForBeforeUnload: false }) } catch {}
+  publishEmbeddedBrowserState()
+}
+
+
+const EMBEDDED_PAGE_INSPECTION_SCRIPT = `(() => {
+  const visible = (element) => {
+    const rect = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+  }
+  const text = String(document.body?.innerText || '').slice(0, 20000)
+  const headings = Array.from(document.querySelectorAll('h1,h2')).filter(visible).slice(0, 30).map((element) => element.innerText.trim()).filter(Boolean)
+  return { title: document.title, url: location.href, text, headings, inspectedAt: new Date().toISOString() }
+})()`
+let embeddedBrowserBridgeServer = null
+let embeddedBrowserBridgePort = 0
+const EMBEDDED_BROWSER_BRIDGE_SECRET = generateControlSecret()
+
+async function inspectEmbeddedBrowserPage() {
+  if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
+  const result = await embeddedBrowserView.webContents.executeJavaScript(EMBEDDED_PAGE_INSPECTION_SCRIPT, true)
+  return { ...result, url: embeddedSafeUrl(embeddedBrowserView.webContents.getURL()) }
+}
+
+function startEmbeddedBrowserBridge() {
+  return new Promise((resolve, reject) => {
+    embeddedBrowserBridgeServer = http.createServer(async (request, response) => {
+      const remote = request.socket.remoteAddress || ''
+      const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
+      const offered = String(request.headers.authorization || '')
+      const expected = `Bearer ${EMBEDDED_BROWSER_BRIDGE_SECRET}`
+      const offeredBuffer = Buffer.from(offered)
+      const expectedBuffer = Buffer.from(expected)
+      const authorized = offeredBuffer.length === expectedBuffer.length && require('crypto').timingSafeEqual(offeredBuffer, expectedBuffer)
+      const send = (status, payload) => {
+        response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+        response.end(JSON.stringify(payload))
+      }
+      if (!loopback || !authorized) return send(401, { error: 'Unauthorized' })
+      if (request.method !== 'POST' || request.url !== '/v1/inspect') return send(404, { error: 'Not found' })
+      let body = ''
+      for await (const chunk of request) {
+        body += chunk.toString('utf8')
+        if (body.length > 1024) return send(413, { error: 'Request too large' })
+      }
+      try {
+        const result = await inspectEmbeddedBrowserPage()
+        send(200, result)
+      } catch (error) {
+        send(409, { error: error.message || 'Embedded browser page is unavailable' })
+      }
+    })
+    embeddedBrowserBridgeServer.once('error', reject)
+    embeddedBrowserBridgeServer.listen(0, '127.0.0.1', () => {
+      const address = embeddedBrowserBridgeServer.address()
+      embeddedBrowserBridgePort = address && typeof address === 'object' ? address.port : 0
+      if (!embeddedBrowserBridgePort) return reject(new Error('Embedded browser bridge did not bind a port'))
+      console.log('[embedded-browser] Authenticated loopback bridge ready')
+      resolve()
+    })
+  })
+}
+
+function stopEmbeddedBrowserBridge() {
+  if (!embeddedBrowserBridgeServer) return
+  embeddedBrowserBridgeServer.close()
+  embeddedBrowserBridgeServer = null
+  embeddedBrowserBridgePort = 0
+}
+
+function attachEmbeddedBrowser(provider) {
+  if (!Object.hasOwn(EMBEDDED_PROVIDERS, provider)) throw new Error('Unsupported AI provider')
+  if (embeddedBrowserView && embeddedBrowserProvider === provider && !embeddedBrowserView.webContents.isDestroyed()) {
+    publishEmbeddedBrowserState()
+    return true
+  }
+  closeEmbeddedBrowser()
+  const browserSession = session.fromPartition(`persist:agentos-embedded-${provider}`)
+  // Remote sites receive no Electron permissions by default. A future explicit
+  // permission flow can grant individual capabilities after user confirmation.
+  browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+  const view = new WebContentsView({
+    webPreferences: {
+      session: browserSession,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      spellcheck: true,
+    },
+  })
+  embeddedBrowserView = view
+  embeddedBrowserProvider = provider
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    try { view.webContents.loadURL(embeddedSafeUrl(url)) } catch {}
+    return { action: 'deny' }
+  })
+  const publish = () => publishEmbeddedBrowserState()
+  for (const event of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page', 'page-title-updated', 'did-fail-load']) {
+    view.webContents.on(event, publish)
+  }
+  view.webContents.on('will-navigate', (event, url) => {
+    try { embeddedSafeUrl(url) } catch { event.preventDefault() }
+  })
+  mainWindow.contentView.addChildView(view)
+  const [width, height] = mainWindow.getContentSize()
+  view.setBounds({ x: 0, y: 96, width, height: Math.max(0, height - 96) })
+  view.webContents.loadURL(EMBEDDED_PROVIDERS[provider]).catch((error) => {
+    console.error('[embedded-browser] Navigation failed:', error.message)
+    publishEmbeddedBrowserState({ error: 'The selected website could not be loaded.' })
+  })
+  publish()
+  return true
+}
+
 function createWindow() {
   const appIconPath = getAppIconPath()
   if (process.platform === 'darwin' && appIconPath && app.dock) {
@@ -544,7 +698,7 @@ function createWindow() {
   const sendMaximized = () => mainWindow?.webContents.send('window:maximized', mainWindow.isMaximized())
   mainWindow.on('maximize', sendMaximized)
   mainWindow.on('unmaximize', sendMaximized)
-  mainWindow.on('closed', () => { mainWindow = null })
+  mainWindow.on('closed', () => { closeEmbeddedBrowser(); mainWindow = null })
 }
 
 app.whenReady().then(async () => {
@@ -569,6 +723,12 @@ app.whenReady().then(async () => {
     return
   }
   if (!currentBackendLaunch().frozen) backendUvCommand = await pickBackendUv()
+  try {
+    await startEmbeddedBrowserBridge()
+  } catch (error) {
+    console.error('[embedded-browser] Local read bridge unavailable:', error.message)
+    stopEmbeddedBrowserBridge()
+  }
   spawnBackend()
   createWindow()
 
@@ -814,6 +974,67 @@ ipcMain.handle('window:control', async (event, action) => {
   else if (window.isMaximized()) window.unmaximize()
   else window.maximize()
   return window.isMaximized()
+})
+
+
+ipcMain.handle('embedded-browser:open', async (event, provider) => {
+  assertTrustedIpcSender(event)
+  if (typeof provider !== 'string') throw new Error('Invalid browser provider')
+  return attachEmbeddedBrowser(provider)
+})
+
+ipcMain.handle('embedded-browser:navigate', async (event, value) => {
+  assertTrustedIpcSender(event)
+  if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
+  await embeddedBrowserView.webContents.loadURL(embeddedSafeUrl(value))
+  return true
+})
+
+ipcMain.handle('embedded-browser:back', async (event) => {
+  assertTrustedIpcSender(event)
+  if (!embeddedBrowserView || !embeddedBrowserView.webContents.navigationHistory.canGoBack()) return false
+  embeddedBrowserView.webContents.navigationHistory.goBack()
+  return true
+})
+
+ipcMain.handle('embedded-browser:forward', async (event) => {
+  assertTrustedIpcSender(event)
+  if (!embeddedBrowserView || !embeddedBrowserView.webContents.navigationHistory.canGoForward()) return false
+  embeddedBrowserView.webContents.navigationHistory.goForward()
+  return true
+})
+
+ipcMain.handle('embedded-browser:reload', async (event) => {
+  assertTrustedIpcSender(event)
+  if (!embeddedBrowserView) return false
+  embeddedBrowserView.webContents.reload()
+  return true
+})
+
+ipcMain.handle('embedded-browser:bounds', async (event, bounds) => {
+  assertTrustedIpcSender(event)
+  if (!embeddedBrowserView || !bounds || typeof bounds !== 'object') return false
+  const values = ['x', 'y', 'width', 'height'].map((key) => Number(bounds[key]))
+  if (!values.every(Number.isFinite) || values[2] < 0 || values[3] < 0) throw new Error('Invalid browser viewport bounds')
+  const [windowWidth, windowHeight] = mainWindow.getContentSize()
+  const x = Math.max(0, Math.min(windowWidth, values[0]))
+  const y = Math.max(0, Math.min(windowHeight, values[1]))
+  const width = Math.max(0, Math.min(windowWidth - x, values[2]))
+  const height = Math.max(0, Math.min(windowHeight - y, values[3]))
+  embeddedBrowserView.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) })
+  return true
+})
+
+ipcMain.handle('embedded-browser:close', async (event) => {
+  assertTrustedIpcSender(event)
+  closeEmbeddedBrowser()
+  return true
+})
+
+ipcMain.handle('embedded-browser:inspect', async (event) => {
+  assertTrustedIpcSender(event)
+  if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
+  return inspectEmbeddedBrowserPage()
 })
 
 ipcMain.handle('storage:clear-app-cache', async (event) => {
