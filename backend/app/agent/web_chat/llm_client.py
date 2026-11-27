@@ -115,6 +115,8 @@ class WebChatLLMClient:
         self._conversation_url = str(conversation_url or "")
         self.run_id = str(run_id or "")
         self._seen_action_ids: set[str] = set()
+        self._last_read_action_signature = ""
+        self._consecutive_read_action_count = 0
         self._call_lock = asyncio.Lock()
 
     def bind_durable_run(self, durable_run) -> None:
@@ -275,6 +277,28 @@ class WebChatLLMClient:
             if action is None:
                 raise RuntimeError("The web-chat response did not contain a valid AgentOS action.")
             call_id = action.action_id
+            # A new action ID must not let the provider spin forever on the
+            # same empty conversation read. Count consecutive identical reads
+            # by action name and arguments, independently of provider IDs.
+            if action.name == "embedded_browser_conversation":
+                signature = json.dumps(
+                    {"action": action.name, "arguments": action.arguments},
+                    sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+                )
+                if signature == self._last_read_action_signature:
+                    self._consecutive_read_action_count += 1
+                else:
+                    self._last_read_action_signature = signature
+                    self._consecutive_read_action_count = 1
+                if self._consecutive_read_action_count > 2:
+                    raise RuntimeError(
+                        "The web-chat provider repeated embedded_browser_conversation "
+                        "without making progress. The repeated read was stopped; "
+                        "use the latest captured messages/pageText or report the capture limitation."
+                    )
+            else:
+                self._last_read_action_signature = ""
+                self._consecutive_read_action_count = 0
             if call_id in self._seen_action_ids:
                 raise RuntimeError("The web-chat provider repeated an action ID; duplicate execution was blocked.")
             if self.run_id:
