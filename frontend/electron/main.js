@@ -740,21 +740,29 @@ async function inspectEmbeddedAccessibilityMessages() {
       const name = String(node?.name?.value || '').trim()
       const description = String(node?.description?.value || '').trim()
       const subtree = descendants(node.nodeId)
+      // Composer wrappers can be exposed as generic/group nodes whose ancestor
+      // labels contain "user". Never classify a subtree containing an editable
+      // control as a posted conversation message.
+      const hasEditableDescendant = subtree.some(child =>
+        ['textbox', 'searchbox', 'combobox', 'textfield'].includes(String(child?.role?.value || '').toLowerCase())
+      )
+      if (hasEditableDescendant) continue
       const bodyText = textFor(node.nodeId)
       if (!bodyText && !name) continue
       const controls = subtree
         .filter(child => String(child?.role?.value || '').toLowerCase() === 'button')
         .map(child => String(child?.name?.value || child?.description?.value || '').toLowerCase())
-      const hint = [
-        name, description, node?.value?.value || '', roleDescription(node),
-        ancestorHint(node), bodyText.slice(0, 1200),
+      const contextHint = [
+        name, description, node?.value?.value || '', roleDescription(node), ancestorHint(node),
       ].join(' ').toLowerCase()
-      const userPrefix = /(?:^|\s)(?:you said|your message|user message|user|from you):?\s*/i
-      const assistantPrefix = /(?:^|\s)(?:chatgpt said|assistant response|assistant|chatgpt|from chatgpt):?\s*/i
-      const hasAssistantControls = controls.some(label => /\b(copy|read aloud|good response|bad response|regenerate|retry|share response)\b/i.test(label))
-      const hasUserControls = controls.some(label => /\b(edit message|edit your message)\b/i.test(label))
-      const messageRole = userPrefix.test(hint) || hasUserControls ? 'user'
-        : assistantPrefix.test(hint) || hasAssistantControls ? 'assistant' : ''
+      // Avoid generic "user"/"assistant" matches: those labels also occur in
+      // composer and navigation accessibility contexts.
+      const hasExplicitUserContext = /\\b(you said|your message|user message|from you)\\b/i.test(contextHint)
+      const hasExplicitAssistantContext = /\\b(chatgpt said|assistant response|from chatgpt)\\b/i.test(contextHint)
+      const hasAssistantControls = controls.some(label => /\\b(copy|read aloud|good response|bad response|regenerate|retry|share response)\\b/i.test(label))
+      const hasUserControls = controls.some(label => /\\b(edit message|edit your message)\\b/i.test(label))
+      const messageRole = hasUserControls || hasExplicitUserContext ? 'user'
+        : hasAssistantControls || hasExplicitAssistantContext ? 'assistant' : ''
       if (!messageRole) continue
       const text = (bodyText || name)
         .replace(/^(?:you said|your message|user message|user|from you|chatgpt said|assistant response|assistant|chatgpt|from chatgpt):?\s*/i, '')
@@ -901,12 +909,43 @@ function startEmbeddedBrowserBridge() {
               send.click()
               return { submitted: true, method: 'send_button' }
             })()`)
-            if (submitted?.submitted) {
-              return send(200, { ok: true, action: 'press_key', key, ...submitted })
-            }
             if (submitted?.reason === 'composer_empty') {
               return send(409, { error: 'The ChatGPT composer is empty; no message was submitted.' })
             }
+            let submissionMethod = submitted?.method || ''
+            if (!submitted?.submitted && submitted?.reason === 'send_button_unavailable') {
+              // Native Enter is only a fallback attempt; it is not considered
+              // successful until the provider clears the composer.
+              sendNativeKey(webContents, key)
+              submissionMethod = 'native_enter'
+            } else if (!submitted?.submitted) {
+              return send(409, { error: 'ChatGPT did not expose a verifiable send action.' })
+            }
+            const deadline = Date.now() + 5000
+            while (Date.now() < deadline) {
+              const state = await executeEmbeddedBrowserScript(webContents, `(() => {
+                const visible = (element) => {
+                  const rect = element.getBoundingClientRect()
+                  const style = getComputedStyle(element)
+                  return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+                }
+                const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
+                  .find(element => visible(element) && !element.disabled)
+                const value = composer ? String(composer.value ?? composer.innerText ?? composer.textContent ?? '').trim() : ''
+                return { composerFound: Boolean(composer), composerEmpty: Boolean(composer) && !value }
+              })()`)
+              if (state?.composerFound && state?.composerEmpty) {
+                return send(200, {
+                  ok: true, action: 'press_key', key,
+                  submitted: true, submissionVerified: true, method: submissionMethod,
+                })
+              }
+              await new Promise(resolve => setTimeout(resolve, 150))
+            }
+            return send(409, {
+              error: 'ChatGPT did not clear its composer after the send attempt; message submission was not confirmed.',
+              code: 'chatgpt_submission_unconfirmed',
+            })
           }
           sendNativeKey(webContents, key)
           return send(200, { ok: true, action: 'press_key', key, submitted: key === 'Enter' ? 'unverified_native_enter' : false })
