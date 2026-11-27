@@ -30,7 +30,7 @@ from app.agent.memory_manager import MemoryManager
 from app.agent.state import ExecutionPlan, PlanStep
 from app.agent.steering import SteeringInbox
 from app.agent.tool_registry import ToolRegistry, can_parallelize
-from app.agent.explicit_tool_scope import explicit_tool_scope, filter_tool_calls
+from app.agent.explicit_tool_scope import ExplicitToolScopeGuard, filter_tool_calls
 from app.agent.tool_observations import (
     DEVTOOLS_PREFIX, DEVTOOLS_STEP_DESCRIPTIONS, compact_tool_observation, extract_image_attachments,
     is_devtools_tool, tool_error_code,
@@ -91,6 +91,7 @@ class ToolBatchRunner:
         self._execution_plan: ExecutionPlan | None = None
         self._sync_plan_progress = getattr(memory, "sync_plan_progress", None)
         self.task_progress = None
+        self._explicit_tool_scope_guard = ExplicitToolScopeGuard()
 
     def initialize_review_history(self) -> None:
         build = getattr(self.memory, "build_approval_review_context", None)
@@ -468,6 +469,23 @@ class ToolBatchRunner:
         if not isinstance(tool_name, str) or not tool_name.strip() or not isinstance(arguments, dict):
             return {"content": [{"type": "text", "text": "Invalid browser transport tool request."}], "isError": True}
 
+        # Internal web-chat transport is a second dispatch path. Apply the same
+        # latched user allowlist here before registry lookup or tool journaling.
+        scope = self._explicit_tool_scope_guard.resolve(self.user_request())
+        if scope is not None and not scope.allows(tool_name):
+            message = (
+                f"Blocked browser transport tool '{tool_name}': this turn explicitly "
+                f"allows only '{scope.allowed_tool}'. No tool was dispatched."
+            )
+            return {
+                "content": [{"type": "text", "text": json.dumps({
+                    "status": "blocked",
+                    "reason_code": "explicit_tool_scope_enforced",
+                    "error": message,
+                })}],
+                "isError": True,
+            }
+
         call_id = "webchat-transport-" + uuid.uuid4().hex
         prepared = self._prepare(
             {"call_id": call_id, "name": tool_name, "arguments": dict(arguments)},
@@ -582,7 +600,7 @@ class ToolBatchRunner:
             return BatchOutcome(self.pause)
         self.recovery.begin_round()
         request_text = self.user_request()
-        scope = explicit_tool_scope(request_text)
+        scope = self._explicit_tool_scope_guard.resolve(request_text)
         scoped_calls = list(calls)
         blocked_by_scope: list[str] = []
         if scope is not None:
