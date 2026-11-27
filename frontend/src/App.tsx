@@ -512,18 +512,11 @@ export default function App() {
   const handleSend = async (text: string, attachments: UploadedAttachment[] = [], webChatTarget?: WebChatTarget) => {
     if (savingWorkspace) return
     if (webChatTarget) {
+      // Select the provider for the next explicit browser/login action, but never
+      // open or foreground the browser as a side effect of sending a chat message.
+      // The already-authenticated persistent WebContents session is used by the
+      // backend bridge while the user stays in the AgentOS conversation UI.
       setEmbeddedBrowserProvider(webChatTarget.provider)
-      setShowEmbeddedBrowser(true)
-      const embedded = window.electronAPI?.embeddedBrowser
-      if (!embedded) return
-      try {
-        // Ensure the selected provider's persistent embedded session is attached
-        // before the backend begins inspecting or submitting to the conversation.
-        await embedded.open(webChatTarget.provider)
-      } catch {
-        // The browser panel reports its own navigation/attachment error.
-        return
-      }
     }
     const generation = workspaceGenerationRef.current
     const onConversationCreated = (newConvId: string) => {
