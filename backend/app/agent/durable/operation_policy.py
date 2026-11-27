@@ -39,6 +39,13 @@ READ_ONLY_TOOL_NAMES = frozenset(
         "computer_functions_get_window_state",
         "computer_functions_list_processes",
         "computer_functions_diagnose",
+        "mcp__chrome-devtools__list_pages",
+        "mcp__chrome-devtools__take_snapshot",
+        "mcp__chrome-devtools__inspect_element",
+        "mcp__chrome-devtools__inspect_web_chat",
+        "mcp__chrome-devtools__wait_for",
+        "mcp__chrome-devtools__list_console_messages",
+        "mcp__chrome-devtools__get_console_message",
     }
 )
 
