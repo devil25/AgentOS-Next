@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from .tools import browser_fetch
+from .tools import browser_fetch, embedded_browser_read
 
 
 def _configured_allowed_domains(settings: Any) -> list[str]:
@@ -70,6 +70,34 @@ def register_browser_tools(registry, settings) -> None:
                     "risk_level": "low",
                     "parallel_safe": True,
                     "resource_locks": [],
+                    "repeat_safe": True,
+                },
+            },
+            {
+                "name": "embedded_browser_read",
+                "description": (
+                    "Read the currently open website inside the AgentOS-Next embedded browser. "
+                    "Returns the visible page title, URL, headings, and text. This is read-only; "
+                    "it does not access cookies, passwords, local storage, or session tokens. "
+                    "Use this when the user asks you to inspect or read the page open in AgentOS Browser."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "max_chars": {"type": "integer", "default": 20000, "minimum": 500, "maximum": 20000},
+                    },
+                    "required": [],
+                },
+                "callable": lambda max_chars=20000, **_unused: embedded_browser_read(max_chars=max_chars),
+                "domain": "browser",
+                "execution_mode": "async",
+                "timeout_seconds": 10.0,
+                "metadata": {
+                    "observation": True,
+                    "mutates_state": False,
+                    "risk_level": "low",
+                    "parallel_safe": True,
+                    "resource_locks": ["embedded_browser"],
                     "repeat_safe": True,
                 },
             }
