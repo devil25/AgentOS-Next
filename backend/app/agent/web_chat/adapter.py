@@ -109,7 +109,13 @@ class WebChatSessionAdapter:
     @staticmethod
     def _conversation_identity(url: str) -> tuple[str, str]:
         parsed = urlsplit(str(url or ""))
-        return ((parsed.hostname or "").lower(), parsed.path.rstrip("/") or "/")
+        hostname = (parsed.hostname or "").lower().rstrip(".")
+        # ChatGPT uses both hostnames for the same authenticated product.
+        # Treat its legacy and canonical HTTPS hosts as one provider identity;
+        # keep the conversation path strict so switching /c/<id> is still blocked.
+        if hostname in {"chatgpt.com", "chat.openai.com"}:
+            hostname = "chatgpt"
+        return (hostname, parsed.path.rstrip("/") or "/")
 
     async def send_and_wait(
         self, *, tab_id: int | None, prompt: str, expected_provider: str,
