@@ -54,6 +54,12 @@ def test_web_chat_run_context_rejects_invalid_targets(tmp_path, provider, page_i
         save_web_chat_run_context("run-1", provider, page_id, db=db)
 
 
+def test_chat_request_accepts_web_chat_provider_without_manual_page_id():
+    request = ChatRequest(message="Use ChatGPT", web_chat_provider="chatgpt")
+    assert request.web_chat_provider == "chatgpt"
+    assert request.web_chat_page_id is None
+
+
 def test_chat_request_rejects_zero_web_chat_page_id():
     with pytest.raises(ValidationError):
         ChatRequest(message="Use ChatGPT", web_chat_provider="chatgpt", web_chat_page_id=0)
