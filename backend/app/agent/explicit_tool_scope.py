@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 
 
-_TOOL_TOKEN = r"[A-Za-z][A-Za-z0-9_.:-]*"
+_TOOL_TOKEN = r"[A-Za-z][A-Za-z0-9_:-]*(?:\.[A-Za-z0-9_:-]+)*"
 # Strip Markdown/quote delimiters before matching. Tool names are protocol
 # identifiers, so punctuation around them must not become part of the name.
 _DELIMITERS = re.compile(r"[\x60'\"“”‘’]")
