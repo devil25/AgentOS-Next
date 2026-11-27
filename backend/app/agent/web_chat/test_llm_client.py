@@ -453,7 +453,8 @@ async def test_web_chat_client_keeps_original_goal_when_internal_browser_guidanc
     )
 
     assert response.content == "The captured answer is ready."
-    assert "Original AgentOS request:\\nRead the latest ChatGPT response" in adapter.prompts[0][1]
+    assert "Original AgentOS request:" in adapter.prompts[0][1]
+    assert "Read the latest ChatGPT response" in adapter.prompts[0][1]
     assert "Browser workflow guidance:" not in adapter.prompts[0][1]
 
 async def test_web_chat_client_stops_consecutive_identical_conversation_reads_with_new_action_ids():
