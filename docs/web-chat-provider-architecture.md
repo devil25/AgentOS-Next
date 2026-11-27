@@ -16,7 +16,7 @@ Chrome is the first supported browser. Firefox is a later, separate browser tran
 
 ## Core interaction loop
 
-1. The user selects a web-chat provider and opens or selects its browser tab. The user signs in directly on the provider website; AgentOS-Next must not collect, store, or ask for provider passwords, cookies, or session tokens.
+1. The user selects a web-chat provider and opens its website in the paired Chrome profile. Unless a page ID is explicitly supplied, AgentOS-Next calls the existing read-only `list_pages` tool, matches HTTPS origins to the selected provider, and automatically selects the only matching tab. If multiple matching tabs exist, it stops with their page IDs/titles rather than guessing. The user signs in directly on the provider website; AgentOS-Next must not collect, store, or ask for provider passwords, cookies, or session tokens.
 2. AgentOS-Next creates or resumes a task and builds a compact instruction containing the original user goal, relevant task context, the allowed AgentOS action protocol, and the last verified execution results.
 3. The selected website receives that instruction in its own conversation. The adapter waits for a **new assistant response** and must distinguish it from the user's prompt, prior assistant messages, page chrome, and stale DOM content.
 4. The response adapter extracts the assistant's actual message. The model must return either a final user-facing answer or exactly one fenced `agentos.v1` action envelope, for example:
@@ -35,7 +35,7 @@ Chrome is the first supported browser. Firefox is a later, separate browser tran
 
 A provider adapter owns only website-specific behavior:
 - Supported origin and URL validation.
-- Finding/creating the intended conversation tab.
+- Finding the intended conversation tab: auto-discover a unique matching provider tab via `list_pages`, or stop with an ambiguity message when multiple tabs match. Never guess between multiple conversations.
 - Locating the composer and send control.
 - Submitting text without changing the active conversation unexpectedly.
 - Detecting a newly-created assistant response and its completion state.
