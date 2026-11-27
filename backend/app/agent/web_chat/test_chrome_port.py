@@ -92,7 +92,7 @@ def test_fixed_web_chat_inspection_is_read_only_and_never_reads_credentials():
 @pytest.mark.anyio
 async def test_automatic_discovery_selects_the_only_matching_provider_tab():
     executor = FakeAuthorizedToolExecutor([
-        {"content": [{"type": "text", "text": "## Pages\\n1: Gmail (https://mail.google.com/)\\n4: ChatGPT (https://chatgpt.com/c/example) [selected]"}]},
+        {"content": [{"type": "text", "text": "## Pages\n1: Gmail (https://mail.google.com/)\n4: ChatGPT (https://chatgpt.com/c/example) [selected]"}]},
         {
             "url": "https://chatgpt.com/c/example",
             "title": "ChatGPT",
@@ -116,7 +116,7 @@ async def test_automatic_discovery_selects_the_only_matching_provider_tab():
 @pytest.mark.anyio
 async def test_automatic_discovery_refuses_ambiguous_provider_tabs():
     executor = FakeAuthorizedToolExecutor([{
-        "content": [{"type": "text", "text": "## Pages\\n2: ChatGPT one (https://chatgpt.com/c/one)\\n5: ChatGPT two (https://chatgpt.com/c/two)"}]
+        "content": [{"type": "text", "text": "## Pages\n2: ChatGPT one (https://chatgpt.com/c/one)\n5: ChatGPT two (https://chatgpt.com/c/two)"}]
     }])
     port = ChromeWebChatBrowserPort(executor, provider="chatgpt")
     with pytest.raises(WebChatAdapterError, match="More than one chatgpt tab"):
