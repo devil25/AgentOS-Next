@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
+const vm = require('node:vm')
 
 const main = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8')
 const preload = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8')
@@ -286,4 +287,16 @@ test('conversation capture waits for an assistant reply after the exact submitte
   assert.match(main, /index > userIndex && item\?\.role === 'assistant'/)
   assert.match(main, /snapshot\.pendingSubmission = true/)
   assert.match(main, /embeddedBrowserPendingSubmission = null/)
+})
+
+
+test('companion service worker and provider observer are valid JavaScript', () => {
+  const worker = fs.readFileSync(path.join(__dirname, '../../browser-companion/service_worker.js'), 'utf8')
+  const content = fs.readFileSync(path.join(__dirname, '../../browser-companion/content.js'), 'utf8')
+  assert.doesNotThrow(() => new vm.Script(worker))
+  assert.doesNotThrow(() => new vm.Script(content))
+  assert.match(content, /new MutationObserver\(schedule\)/)
+  assert.match(content, /stableForMs/)
+  assert.match(worker, /\/v1\/companion\/event/)
+  assert.doesNotMatch(worker + content, /chrome\.cookies|document\.cookie|input\[type=["']password["']\]\.value/)
 })
