@@ -191,6 +191,8 @@ async def test_embedded_browser_conversation_returns_bounded_structured_messages
     assert result["ok"] is True
     assert [item["role"] for item in result["messages"]] == ["user", "assistant"]
     assert result["messageCount"] == 2
+    assert result["totalMessageCount"] == 2
+    assert result["captureTruncated"] is False
     assert result["captureSource"] == "accessibility_tree"
     assert result["accessibilityNodeCount"] == 4812
     assert result["pageText"] == ""
@@ -260,3 +262,54 @@ def test_embedded_conversation_observation_cannot_repeat_forever():
     decision = policy.decide(request=call, registry=registry)
     assert decision.allowed is False
     assert decision.metadata["code"] == "repeated_tool_call_blocked"
+
+
+
+@pytest.mark.anyio
+async def test_embedded_browser_conversation_keeps_only_latest_exchange_and_bounds_long_reply(monkeypatch):
+    monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_PORT", "43210")
+    monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_SECRET", "test-secret")
+    messages = [
+        {"message_id": "old-user", "role": "user", "text": "old question"},
+        {"message_id": "old-assistant", "role": "assistant", "text": "old answer"},
+        {"message_id": "latest-user", "role": "user", "text": "latest question"},
+        {"message_id": "latest-assistant", "role": "assistant", "text": "A" * 30000},
+    ]
+
+    def fake_urlopen(request, timeout):
+        return _Response({
+            "ok": True,
+            "provider": "chatgpt",
+            "title": "ChatGPT",
+            "url": "https://chatgpt.com/c/abc",
+            "messages": messages,
+            "captureSource": "accessibility_tree",
+            "pageText": "duplicate page evidence should not be returned",
+        })
+
+    monkeypatch.setattr(tools.urllib.request, "urlopen", fake_urlopen)
+    result = json.loads(await tools.embedded_browser_conversation())
+
+    assert [item["message_id"] for item in result["messages"]] == ["latest-user", "latest-assistant"]
+    assert result["messages"][0]["text"] == "latest question"
+    assert len(result["messages"][1]["text"]) < 24500
+    assert result["totalMessageCount"] == 4
+    assert result["messageCount"] == 2
+    assert result["captureTruncated"] is True
+    assert result["pageText"] == ""
+
+
+def test_browser_workflow_tells_agent_to_consume_conversation_capture_once():
+    from app.agent.harness.browser_workflow import BrowserWorkflow
+
+    workflow = BrowserWorkflow()
+    output = json.dumps({
+        "ok": True,
+        "messages": [{"role": "assistant", "text": "The captured answer"}],
+        "pageText": "",
+    })
+    hint = workflow.observe("embedded_browser_conversation", {}, output, "ok")
+
+    assert "already captured above" in hint
+    assert "answer the user now" in hint
+    assert workflow.observe("embedded_browser_conversation", {}, output, "ok") == ""
