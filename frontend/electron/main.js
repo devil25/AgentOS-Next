@@ -649,64 +649,50 @@ async function inspectEmbeddedAccessibilityMessages() {
       debuggerClient.attach('1.3')
       attachedHere = true
     }
+    // One bounded CDP round-trip only. Resolving every AX node individually
+    // caused slow, serial debugger traffic and could stall the conversation
+    // endpoint while ChatGPT was rendering a response.
     const tree = await debuggerClient.sendCommand('Accessibility.getFullAXTree')
-    const nodes = Array.isArray(tree?.nodes) ? tree.nodes : []
-    const messages = []
-    for (const node of nodes) {
-      const role = String(node?.role?.value || '').toLowerCase()
-      if (!['article', 'group', 'region'].includes(role) || !Number.isInteger(node.backendDOMNodeId)) continue
-      let objectId
-      try {
-        const resolved = await debuggerClient.sendCommand('DOM.resolveNode', {
-          backendNodeId: node.backendDOMNodeId,
-        })
-        objectId = resolved?.object?.objectId
-        if (!objectId) continue
-        const inspected = await debuggerClient.sendCommand('Runtime.callFunctionOn', {
-          objectId,
-          functionDeclaration: `function () {
-            const attrs = ['data-message-author-role','data-role','data-author','data-sender','data-message-id','data-testid','aria-label']
-            const attributes = Object.fromEntries(attrs.map(name => [name, this.getAttribute(name) || '']))
-            const nested = this.querySelector('[data-message-author-role],[data-role],[data-author],[data-sender]')
-            if (nested) {
-              for (const name of attrs) attributes[name] = nested.getAttribute(name) || attributes[name]
-            }
-            return { attributes, text: String(this.innerText || this.textContent || '').trim().slice(0, 20000) }
-          }`,
-          returnByValue: true,
-        })
-        const value = inspected?.result?.value
-        if (!value?.text) continue
-        const attrs = value.attributes || {}
-        const hint = [attrs['data-message-author-role'], attrs['data-role'], attrs['data-author'],
-          attrs['data-sender'], attrs['aria-label'], attrs['data-testid'], node.name?.value].join(' ').toLowerCase()
-        const messageRole = /user|human|you said/.test(hint) ? 'user'
-          : /assistant|chatgpt|model response|chatgpt said/.test(hint) ? 'assistant' : ''
-        if (!messageRole) continue
-        const identity = attrs['data-message-id'] || attrs['data-testid'] || node.nodeId
-        messages.push({
-          message_id: String(identity).slice(0, 300),
-          role: messageRole,
-          text: value.text,
-          complete: true,
-        })
-      } catch {
-        // A stale AX backend node is skipped; the next snapshot resolves fresh IDs.
-      } finally {
-        if (objectId) {
-          try {
-            await debuggerClient.sendCommand('Runtime.releaseObject', { objectId })
-          } catch {}
-        }
-      }
-    }
-    const seen = new Set()
-    return messages.filter(message => {
-      const key = message.role + ':' + message.message_id
-      if (seen.has(key)) return false
+    const rawNodes = Array.isArray(tree?.nodes) ? tree.nodes.slice(0, 4000) : []
+    const byId = new Map(rawNodes.map(node => [String(node.nodeId), node]))
+    const textFor = (nodeId, depth = 0, seen = new Set()) => {
+      if (depth > 24 || seen.size >= 400 || seen.has(String(nodeId))) return ''
+      const key = String(nodeId)
+      const node = byId.get(key)
+      if (!node) return ''
       seen.add(key)
+      const own = String(node.name?.value ?? '').trim()
+      const role = String(node.role?.value || '').toLowerCase()
+      const ownText = role === 'statictext' || role === 'paragraph' || role === 'heading' ? own : ''
+      const children = Array.isArray(node.childIds) ? node.childIds : []
+      const childText = children.map(child => textFor(child, depth + 1, seen)).filter(Boolean)
+      return [ownText, ...childText].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 20000)
+    }
+    const messages = []
+    for (const node of rawNodes) {
+      const role = String(node?.role?.value || '').toLowerCase()
+      if (!['article', 'group', 'region'].includes(role)) continue
+      const name = String(node?.name?.value || '').trim()
+      const description = String(node?.description?.value || '').trim()
+      const hint = [name, description, node?.value?.value || ''].join(' ').toLowerCase()
+      const messageRole = /\\b(user|human|you said|you:|your message)\\b/.test(hint) ? 'user'
+        : /\\b(assistant|chatgpt|model response|chatgpt said)\\b/.test(hint) ? 'assistant' : ''
+      if (!messageRole) continue
+      const text = (name && !/^(user|assistant|chatgpt|you said|chatgpt said)$/i.test(name)
+        ? name : textFor(node.nodeId)).trim().slice(0, 20000)
+      if (!text) continue
+      const identity = String(node.nodeId || '')
+      if (!identity) continue
+      messages.push({ message_id: identity, role: messageRole, text, complete: true })
+      if (messages.length >= 100) break
+    }
+    const seenMessages = new Set()
+    return messages.filter(message => {
+      const key = message.role + ':' + message.text
+      if (seenMessages.has(key)) return false
+      seenMessages.add(key)
       return true
-    }).slice(-100)
+    })
   } catch (error) {
     console.warn('[embedded-browser] Accessibility snapshot unavailable:', String(error?.message || error).slice(0, 300))
     return []
