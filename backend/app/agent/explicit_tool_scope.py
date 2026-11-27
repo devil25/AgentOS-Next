@@ -7,11 +7,11 @@ from dataclasses import dataclass
 
 _TOOL_TOKEN = r"[A-Za-z][A-Za-z0-9_.:-]*"
 _PATTERNS = (
-    re.compile(rf"\b(?:use|using|call|invoke|execute)\s+(?:(?:the|only)\s+)?(?:tool\s+)?[`'\\"“”]?({_TOOL_TOKEN})[`'\\"“”]?\s+only\b", re.IGNORECASE),
-    re.compile(rf"\bonly\s+(?:use|call|invoke|execute)\s+(?:(?:the)\s+)?(?:tool\s+)?[`'\\"“”]?({_TOOL_TOKEN})[`'\\"“”]?", re.IGNORECASE),
+    re.compile(r"""\b(?:use|using|call|invoke|execute)\s+(?:(?:the|only)\s+)?(?:tool\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+only\b""", re.IGNORECASE),
+    re.compile(r"""\bonly\s+(?:use|call|invoke|execute)\s+(?:(?:the)\s+)?(?:tool\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?""", re.IGNORECASE),
 )
-_ARABIC_PATTERN = re.compile(rf"(?:استخدم|استعمل|نفّذ|نفذ)\s+(?:(?:الأداة|أداة)\s+)?[`'\\"“”]?({_TOOL_TOKEN})[`'\\"“”]?\s+فقط")
-_ARABIC_USING_PATTERN = re.compile(rf"باستخدام\s+(?:(?:الأداة|أداة)\s+)?[`'\\"“”]?({_TOOL_TOKEN})[`'\\"“”]?\s+فقط")
+_ARABIC_PATTERN = re.compile(r"""(?:استخدم|استعمل|نفّذ|نفذ)\s+(?:(?:الأداة|أداة)\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+فقط""")
+_ARABIC_USING_PATTERN = re.compile(r"""باستخدام\s+(?:(?:الأداة|أداة)\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+فقط""")
 
 
 @dataclass(frozen=True)
@@ -25,11 +25,7 @@ class ExplicitToolScope:
 
 
 class ExplicitToolScopeGuard:
-    """Latch the original user restriction for the lifetime of one turn.
-
-    Later model/tool-result messages must never replace the user's original
-    allowlist with a broader or empty scope.
-    """
+    """Latch the original user restriction for the lifetime of one turn."""
 
     def __init__(self) -> None:
         self._resolved = False
@@ -43,7 +39,6 @@ class ExplicitToolScopeGuard:
 
 
 def filter_tool_calls(scope: ExplicitToolScope, calls: list[dict]) -> tuple[list[dict], list[str]]:
-    """Keep only calls inside the explicit scope; return blocked tool names."""
     allowed: list[dict] = []
     blocked: list[str] = []
     for call in calls:
@@ -56,7 +51,6 @@ def filter_tool_calls(scope: ExplicitToolScope, calls: list[dict]) -> tuple[list
 
 
 def explicit_tool_scope(user_request: str) -> ExplicitToolScope | None:
-    """Return a one-tool scope only when the user explicitly says that tool only."""
     text = str(user_request or "")
     for pattern in (*_PATTERNS, _ARABIC_PATTERN, _ARABIC_USING_PATTERN):
         match = pattern.search(text)
