@@ -152,6 +152,19 @@ test('ChatGPT accessibility capture excludes editable composer subtrees and weak
   assert.doesNotMatch(capture, /userPrefix|assistantPrefix/)
 })
 
+test('embedded browser type resolves a fresh unique composer instead of trusting a stale snapshot index', () => {
+  const start = main.indexOf('const EMBEDDED_BROWSER_INTERACTION_SCRIPT')
+  const end = main.indexOf('`', start + 'const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `'.length)
+  const script = main.slice(start, end)
+  assert.match(script, /if \(action === 'type'\) \{[\s\S]*?querySelectorAll\('textarea,\[contenteditable="true"\],\[role="textbox"\]'\)/)
+  assert.match(script, /const preferred = composers\.filter\(element =>[\s\S]*?data-testid.*prompt-textarea/)
+  assert.match(script, /if \(choices\.length !== 1\)/)
+  assert.match(script, /Multiple editable composers are visible; no text was entered/)
+  assert.match(script, /No visible editable text composer was found; no text was entered/)
+  assert.match(script, /const index = Number\(args\.index\)/)
+  assert.ok(script.indexOf("if (action === 'type')") < script.indexOf('const index = Number(args.index)'))
+})
+
 test('embedded browser text entry and Enter use native Electron input events', () => {
   const events = []
   const webContents = {
