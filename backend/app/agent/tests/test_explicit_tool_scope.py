@@ -9,6 +9,8 @@ from app.agent.explicit_tool_scope import explicit_tool_scope, filter_tool_calls
     ("Only use tool `list_pages`.", "list_pages"),
     ("استخدم أداة `list_pages` فقط.", "list_pages"),
     ("نفّذ `list_pages` فقط.", "list_pages"),
+    ("نفّذ اختبار اتصال Chrome باستخدام أداة `list_pages` فقط.", "list_pages"),
+    ("نفّذ الاختبار باستخدام أداة `list_pages` فقط.", "list_pages"),
 ])
 def test_explicit_single_tool_scope_is_detected(user_text, allowed):
     scope = explicit_tool_scope(user_text)
