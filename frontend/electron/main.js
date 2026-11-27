@@ -637,6 +637,84 @@ async function inspectEmbeddedBrowserPage() {
   return { ...result, url: embeddedSafeUrl(embeddedBrowserView.webContents.getURL()) }
 }
 
+
+async function inspectEmbeddedAccessibilityMessages() {
+  if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) return []
+  const debuggerClient = embeddedBrowserView.webContents.debugger
+  let attachedHere = false
+  try {
+    if (!debuggerClient.isAttached()) {
+      debuggerClient.attach('1.3')
+      attachedHere = true
+    }
+    const tree = await debuggerClient.sendCommand('Accessibility.getFullAXTree')
+    const nodes = Array.isArray(tree?.nodes) ? tree.nodes : []
+    const messages = []
+    for (const node of nodes) {
+      const role = String(node?.role?.value || '').toLowerCase()
+      if (!['article', 'group', 'region'].includes(role) || !Number.isInteger(node.backendDOMNodeId)) continue
+      let objectId
+      try {
+        const resolved = await debuggerClient.sendCommand('DOM.resolveNode', {
+          backendNodeId: node.backendDOMNodeId,
+        })
+        objectId = resolved?.object?.objectId
+        if (!objectId) continue
+        const inspected = await debuggerClient.sendCommand('Runtime.callFunctionOn', {
+          objectId,
+          functionDeclaration: `function () {
+            const attrs = ['data-message-author-role','data-role','data-author','data-sender','data-testid','aria-label']
+            const attributes = Object.fromEntries(attrs.map(name => [name, this.getAttribute(name) || '']))
+            const nested = this.querySelector('[data-message-author-role],[data-role],[data-author],[data-sender]')
+            if (nested) {
+              for (const name of attrs) attributes[name] = nested.getAttribute(name) || attributes[name]
+            }
+            return { attributes, text: String(this.innerText || this.textContent || '').trim().slice(0, 20000) }
+          }`,
+          returnByValue: true,
+        })
+        const value = inspected?.result?.value
+        if (!value?.text) continue
+        const attrs = value.attributes || {}
+        const hint = [attrs['data-message-author-role'], attrs['data-role'], attrs['data-author'],
+          attrs['data-sender'], attrs['aria-label'], attrs['data-testid'], node.name?.value].join(' ').toLowerCase()
+        const messageRole = /user|human|you said/.test(hint) ? 'user'
+          : /assistant|chatgpt|model response|chatgpt said/.test(hint) ? 'assistant' : ''
+        if (!messageRole) continue
+        const identity = attrs['data-message-id'] || attrs['data-testid'] || node.nodeId
+        messages.push({
+          message_id: String(identity).slice(0, 300),
+          role: messageRole,
+          text: value.text,
+          complete: true,
+        })
+      } catch {
+        // A stale AX backend node is skipped; the next snapshot resolves fresh IDs.
+      } finally {
+        if (objectId) {
+          try {
+            await debuggerClient.sendCommand('Runtime.releaseObject', { objectId })
+          } catch {}
+        }
+      }
+    }
+    const seen = new Set()
+    return messages.filter(message => {
+      const key = message.role + ':' + message.message_id
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).slice(-100)
+  } catch (error) {
+    console.warn('[embedded-browser] Accessibility snapshot unavailable:', String(error?.message || error).slice(0, 300))
+    return []
+  } finally {
+    if (attachedHere && debuggerClient.isAttached()) {
+      try { debuggerClient.detach() } catch {}
+    }
+  }
+}
+
 function startEmbeddedBrowserBridge() {
   return new Promise((resolve, reject) => {
     embeddedBrowserBridgeServer = http.createServer(async (request, response) => {
@@ -663,7 +741,17 @@ function startEmbeddedBrowserBridge() {
         if (request.url === '/v1/conversation') {
           if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
           const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
-          return send(200, await embeddedBrowserView.webContents.executeJavaScript(script, true))
+          const snapshot = await embeddedBrowserView.webContents.executeJavaScript(script, true)
+          if (snapshot?.provider === 'chatgpt' && (!Array.isArray(snapshot.messages) || snapshot.messages.length === 0)) {
+            // ChatGPT has changed its rendered DOM more than once. Fall back to
+            // Chromium's accessibility tree, the same source used by the
+            // original AgentOS browser extension, instead of guessing CSS roles.
+            snapshot.messages = await inspectEmbeddedAccessibilityMessages()
+            snapshot.captureSource = snapshot.messages.length ? 'accessibility_tree' : 'none'
+          } else {
+            snapshot.captureSource = 'dom'
+          }
+          return send(200, snapshot)
         }
         const payload = body ? JSON.parse(body) : {}
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return send(400, { error: 'Invalid action payload' })
