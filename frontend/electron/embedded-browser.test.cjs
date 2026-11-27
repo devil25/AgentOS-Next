@@ -129,12 +129,20 @@ test('embedded browser native text replacement uses the macOS command modifier',
 })
 
 
-test('closing the login browser hides it without destroying the signed-in provider session', () => {
+test('closing the login browser hides it without collapsing or destroying the signed-in provider session', () => {
   assert.match(main, /function hideEmbeddedBrowser\(\)/)
   assert.match(main, /embeddedBrowserVisible = false/)
-  assert.match(main, /embeddedBrowserView\.setBounds\(\{ x: 0, y: 0, width: 0, height: 0 \}\)/)
+  assert.match(main, /embeddedBrowserView\.setVisible\(false\)/)
   assert.match(main, /embedded-browser:close'[\s\S]*?hideEmbeddedBrowser\(\)/)
   assert.match(main, /persist:agentos-embedded-\$\{provider\}/)
+  assert.match(main, /Keep the persistent WebContents alive/)
+})
+
+test('AgentOS starts a responsive hidden ChatGPT session at application startup', () => {
+  assert.match(main, /attachEmbeddedBrowser\('chatgpt', \{ visible: false \}\)/)
+  assert.match(main, /view\.webContents\.setBackgroundThrottling\(false\)/)
+  assert.match(main, /view\.setBounds\(\{ x: 0, y: 96, width, height: Math\.max\(1, height - 96\) \}\)/)
+  assert.match(main, /view\.setVisible\(visible\)/)
 })
 
 test('sending a web-chat message does not open or foreground the embedded browser', () => {
