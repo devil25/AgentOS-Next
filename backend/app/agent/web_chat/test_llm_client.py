@@ -269,20 +269,20 @@ def test_only_real_provider_action_results_are_tagged_for_handoff():
 
 
 
-def test_chat_request_requires_web_chat_provider_and_tab_as_a_pair():
+def test_chat_request_accepts_automatic_provider_discovery_and_validates_optional_page_id():
     from pydantic import ValidationError
     from app.schemas import ChatRequest
 
-    with pytest.raises(ValidationError):
-        ChatRequest(message="Run a task", web_chat_provider="chatgpt")
     with pytest.raises(ValidationError):
         ChatRequest(message="Run a task", web_chat_page_id=12)
     with pytest.raises(ValidationError):
         ChatRequest(message="Run a task", web_chat_provider="chatgpt", web_chat_page_id=-1)
 
-    request = ChatRequest(
-        message="Run a task", web_chat_provider="zai", web_chat_page_id=12,
-    )
+    automatic = ChatRequest(message="Run a task", web_chat_provider="chatgpt")
+    assert automatic.web_chat_provider == "chatgpt"
+    assert automatic.web_chat_page_id is None
+
+    request = ChatRequest(message="Run a task", web_chat_provider="zai", web_chat_page_id=12)
     assert request.web_chat_provider == "zai"
     assert request.web_chat_page_id == 12
 
