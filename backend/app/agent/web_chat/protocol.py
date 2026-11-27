@@ -42,10 +42,24 @@ class WebChatReply:
     action: WebChatAction | None = None
 
 
+def normalize_provider_url(url: str) -> str:
+    """Unwrap a self-referential Markdown link around an HTTPS URL.
+
+    Some browser-tool renderers serialize URL fields as Markdown links even
+    when the underlying DOM value is a plain URL. Only accept a link whose
+    visible label exactly matches its HTTPS destination.
+    """
+    value = str(url or "").strip().replace(r"\\]", "]").replace(r"\\)", ")")
+    match = re.fullmatch(r"\\[([^\\]]+)\\]\\((https://[^)\\s]+)\\)", value)
+    if match and match.group(1).strip() == match.group(2).strip():
+        return match.group(2).strip()
+    return value
+
+
 def provider_for_url(url: str) -> str | None:
     """Match exact HTTPS origins only; reject deceptive subdomains and credentials."""
     try:
-        parsed = urlsplit(str(url or "").strip())
+        parsed = urlsplit(normalize_provider_url(url))
         if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port not in (None, 443):
             return None
         host = (parsed.hostname or "").lower().rstrip(".")
