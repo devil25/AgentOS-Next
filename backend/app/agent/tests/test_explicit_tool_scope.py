@@ -1,6 +1,6 @@
 import pytest
 
-from app.agent.explicit_tool_scope import explicit_tool_scope, filter_tool_calls
+from app.agent.explicit_tool_scope import ExplicitToolScopeGuard, explicit_tool_scope, filter_tool_calls
 
 
 @pytest.mark.parametrize("user_text,allowed", [
@@ -59,3 +59,22 @@ def test_namespaced_allowed_tool_is_retained_but_other_mcp_tools_are_blocked():
     allowed, blocked = filter_tool_calls(scope, calls)
     assert allowed == [calls[0]]
     assert blocked == ["mcp__chrome_devtools__inspect_web_chat"]
+
+
+
+def test_scope_is_latched_from_original_request_across_later_tool_result_rounds():
+    guard = ExplicitToolScopeGuard()
+    original = "نفّذ اختبار اتصال Chrome باستخدام أداة `list_pages` فقط."
+    scope = guard.resolve(original)
+    assert scope is not None
+    assert scope.allows("mcp__chrome-devtools__list_pages")
+
+    # A later user/tool-result context must not erase the original restriction.
+    assert guard.resolve("AgentOS tool result: pages listed") is scope
+    assert not scope.allows("mcp__chrome-devtools__inspect_web_chat")
+
+
+def test_scope_guard_does_not_allow_a_later_request_to_broaden_an_unrestricted_turn():
+    guard = ExplicitToolScopeGuard()
+    assert guard.resolve("List the open Chrome pages.") is None
+    assert guard.resolve("Use `list_pages` only.") is None
