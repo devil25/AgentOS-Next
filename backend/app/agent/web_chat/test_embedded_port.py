@@ -55,6 +55,60 @@ async def test_embedded_port_rejects_provider_mismatch_before_submission():
 
 
 @pytest.mark.anyio
+async def test_embedded_port_starts_new_chat_only_when_control_and_empty_state_are_confirmed():
+    calls = []
+    conversation_reads = [
+        {"ok": True, "provider": "chatgpt", "url": "https://chatgpt.com/c/old",
+         "messages": [{"message_id": "a1", "role": "assistant", "text": "Old context"}],
+         "composerReady": True},
+        {"ok": True, "provider": "chatgpt", "url": "https://chatgpt.com/",
+         "messages": [], "composerReady": True},
+    ]
+
+    async def execute(name, arguments):
+        calls.append((name, arguments))
+        if name == "embedded_browser_conversation":
+            return _tool_result(conversation_reads.pop(0))
+        if name == "embedded_browser_snapshot":
+            return _tool_result({"ok": True, "elements": [
+                {"index": 4, "tag": "button", "label": "New chat", "text": ""},
+            ]})
+        if name == "embedded_browser_click":
+            return _tool_result({"ok": True, "action": "click", "index": 4})
+        raise AssertionError(name)
+
+    port = EmbeddedWebChatBrowserPort("chatgpt", execute)
+    new_url = await port.start_new_conversation()
+    assert new_url == "https://chatgpt.com/"
+    assert calls == [
+        ("embedded_browser_conversation", {}),
+        ("embedded_browser_snapshot", {}),
+        ("embedded_browser_click", {"index": 4}),
+        ("embedded_browser_conversation", {}),
+    ]
+
+
+@pytest.mark.anyio
+async def test_embedded_port_refuses_ambiguous_new_chat_controls():
+    calls = []
+
+    async def execute(name, _arguments):
+        calls.append(name)
+        if name == "embedded_browser_conversation":
+            return _tool_result({"ok": True, "provider": "chatgpt",
+                "url": "https://chatgpt.com/c/old", "messages": [], "composerReady": True})
+        return _tool_result({"ok": True, "elements": [
+            {"index": 1, "label": "New chat"},
+            {"index": 2, "text": "New chat"},
+        ]})
+
+    port = EmbeddedWebChatBrowserPort("chatgpt", execute)
+    with pytest.raises(WebChatAdapterError, match="exactly one"):
+        await port.start_new_conversation()
+    assert calls == ["embedded_browser_conversation", "embedded_browser_snapshot"]
+
+
+@pytest.mark.anyio
 async def test_embedded_port_submits_only_to_one_editable_composer():
     calls = []
 
