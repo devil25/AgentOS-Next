@@ -700,7 +700,7 @@ def _compact_embedded_conversation_messages(messages: list[Any]) -> tuple[list[d
     safe_messages: list[dict[str, Any]] = []
     truncated = len(selected_positions) < total_count
     for position in selected_positions:
-        original_index, item = normalized[position]
+        item = normalized[position][1]
         is_latest_assistant = position == latest_assistant
         limit = 24000 if is_latest_assistant else 2000
         message_text = item["text"]
