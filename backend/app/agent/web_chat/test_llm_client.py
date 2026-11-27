@@ -428,9 +428,6 @@ async def test_web_chat_client_handles_large_global_catalog_by_sending_relevant_
 
 
 @pytest.mark.anyio
-
-
-@pytest.mark.anyio
 async def test_web_chat_client_keeps_original_goal_when_internal_browser_guidance_follows_tool_result():
     adapter = FakeAdapter(["The captured answer is ready."])
     client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
@@ -457,6 +454,8 @@ async def test_web_chat_client_keeps_original_goal_when_internal_browser_guidanc
     assert "Read the latest ChatGPT response" in adapter.prompts[0][1]
     assert "Browser workflow guidance:" not in adapter.prompts[0][1]
 
+
+@pytest.mark.anyio
 async def test_web_chat_client_stops_consecutive_identical_conversation_reads_with_new_action_ids():
     def read_action(action_id):
         payload = {
