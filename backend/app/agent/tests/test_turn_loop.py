@@ -4491,3 +4491,81 @@ def test_explicit_tool_scope_blocks_extra_calls_before_dispatch_in_same_batch():
     )
     assert events[-1]["data"]["reason_code"] == "explicit_tool_scope_enforced"
 
+
+
+def test_explicit_open_google_uses_new_page_without_web_chat_inspection():
+    invoked = []
+
+    class NeverCallWebChat:
+        provider = "web_chat"
+        model_name = "ChatGPT Web Chat"
+
+        async def chat_with_tools(self, *args, **kwargs):
+            raise AssertionError("Opening Google must not enter the web-chat transport.")
+
+    def new_page(url, includeSnapshot=False):
+        invoked.append((url, includeSnapshot))
+        return json.dumps({
+            "ok": True,
+            "status": "ok",
+            "server": "chrome-devtools",
+            "tool": "new_page",
+            "content": [{"type": "text", "text": "Opened new page: https://www.google.com/"}],
+        })
+
+    def inspect_web_chat(pageId):
+        raise AssertionError(f"inspect_web_chat must not run (pageId={pageId}).")
+
+    registry = ToolRegistry([
+        {
+            "name": "mcp__chrome-devtools__new_page",
+            "callable": new_page,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "includeSnapshot": {"type": "boolean"},
+                },
+                "required": ["url"],
+            },
+            "metadata": {"risk_level": "low", "repeat_safe": True, "mutates_state": True},
+        },
+        {
+            "name": "mcp__chrome-devtools__inspect_web_chat",
+            "callable": inspect_web_chat,
+            "parameters": {
+                "type": "object",
+                "properties": {"pageId": {"type": "integer"}},
+                "required": ["pageId"],
+            },
+            "metadata": {"risk_level": "low", "repeat_safe": True},
+        },
+    ])
+    loop = TurnLoop(
+        llm_client=NeverCallWebChat(),
+        registry=registry,
+        memory=PersistingFakeMemory(),
+        observability=FakeObservability(),
+    )
+
+    async def collect():
+        return [event async for event in loop.run(
+            "افتح في المتصفح صفحة محرك البحث جوجل",
+            "explicit-open-google",
+            system_prompt="",
+            reasoning_client=NeverCallWebChat(),
+        )]
+
+    try:
+        events = asyncio.run(collect())
+    finally:
+        loop.shutdown()
+
+    assert invoked == [("https://www.google.com/", False)]
+    assert events[-1]["event"] == "done"
+    assert events[-1]["data"]["status"] == "complete"
+    started_tools = [
+        event["data"]["tool"] for event in events if event["event"] == "tool_start"
+    ]
+    assert started_tools == ["mcp__chrome-devtools__new_page"]
+    assert "inspect_web_chat" not in " ".join(started_tools)
