@@ -37,7 +37,7 @@ class ConversationSnapshot:
 
 
 class WebChatBrowserPort(Protocol):
-    async def inspect(self, tab_id: int) -> ConversationSnapshot: ...
+    async def inspect(self, tab_id: int | None) -> ConversationSnapshot: ...
     async def submit(self, tab_id: int, text: str) -> None: ...
 
 
@@ -77,11 +77,16 @@ class WebChatSessionAdapter:
         self, *, tab_id: int, prompt: str, expected_provider: str,
         expected_conversation_url: str = "",
     ) -> WebChatTurn:
-        if not isinstance(tab_id, int) or tab_id < 0:
-            raise WebChatAdapterError("A valid Chrome tab ID is required.")
+        if tab_id is not None and (not isinstance(tab_id, int) or isinstance(tab_id, bool) or tab_id < 1):
+            raise WebChatAdapterError("A valid Chrome page ID is required.")
         if not str(prompt or "").strip():
             raise WebChatAdapterError("The web-chat prompt cannot be empty.")
         before = await self.browser.inspect(tab_id)
+        resolved_page_id = getattr(self.browser, "resolved_page_id", None)
+        if tab_id is None:
+            tab_id = resolved_page_id
+        if not isinstance(tab_id, int) or isinstance(tab_id, bool) or tab_id < 1:
+            raise WebChatAdapterError("Chrome did not resolve a valid page ID for the selected provider.")
         provider = provider_for_url(before.url)
         if provider is None or provider != expected_provider:
             raise WebChatAdapterError("The selected tab is not on the expected supported HTTPS provider website.")
