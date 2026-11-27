@@ -35,7 +35,7 @@ foreach ($pathSource in @($env:Path, $machinePath, $userPath)) {
   foreach ($entry in ([string]$pathSource -split ';')) {
     $candidate = $entry.Trim()
     if (-not $candidate) { continue }
-    $candidate = $candidate.TrimEnd([char]'/','\')
+    $candidate = $candidate.TrimEnd([char]'/', [char]92)
     if (-not $seenPathEntries.Add($candidate)) { continue }
 
     $additionalLength = $candidate.Length
