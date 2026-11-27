@@ -69,3 +69,13 @@ test('embedded browser exposes only fixed interaction actions through its authen
   assert.match(main, /value\.length > 4000/)
   assert.doesNotMatch(main, /payload\.script|payload\.javascript|executeJavaScript\(payload/)
 })
+
+test('embedded conversation endpoint returns provider-aware structured messages', () => {
+  assert.match(main, /action === 'conversation'/)
+  assert.match(main, /data-message-author-role/)
+  assert.match(main, /composerReady/)
+  assert.match(main, /loginRequired/)
+  assert.match(main, /generating/)
+  assert.match(main, /request\.url === '\/v1\/conversation'/)
+  assert.match(main, /executeJavaScript\(script, true\)/)
+})
