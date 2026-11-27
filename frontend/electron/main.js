@@ -757,12 +757,18 @@ function startEmbeddedBrowserBridge() {
           if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
           const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
           const snapshot = await embeddedBrowserView.webContents.executeJavaScript(script, true)
-          if (snapshot?.provider === 'chatgpt' && (!Array.isArray(snapshot.messages) || snapshot.messages.length === 0)) {
-            // ChatGPT has changed its rendered DOM more than once. Fall back to
-            // Chromium's accessibility tree, the same source used by the
-            // original AgentOS browser extension, instead of guessing CSS roles.
-            snapshot.messages = await inspectEmbeddedAccessibilityMessages()
-            snapshot.captureSource = snapshot.messages.length ? 'accessibility_tree' : 'none'
+          if (snapshot?.provider === 'chatgpt') {
+            // Prefer the legacy AgentOS evidence model for every read, not only
+            // when CSS extraction fails. Stable backendDOMNodeIds let the
+            // adapter compare the same accessible nodes across successive
+            // snapshots even when the SPA changes its URL.
+            const accessibilityMessages = await inspectEmbeddedAccessibilityMessages()
+            if (accessibilityMessages.length) {
+              snapshot.messages = accessibilityMessages
+              snapshot.captureSource = 'accessibility_tree'
+            } else {
+              snapshot.captureSource = Array.isArray(snapshot.messages) && snapshot.messages.length ? 'dom' : 'none'
+            }
           } else {
             snapshot.captureSource = 'dom'
           }
