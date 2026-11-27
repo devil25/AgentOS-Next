@@ -17,21 +17,45 @@
   const textOf = element => String(element?.innerText || element?.textContent || '')
     .replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim().slice(0, 2500);
 
+  const CHATGPT_MESSAGE_SELECTORS = [
+    '[data-message-author-role]',
+    '[data-role="user"]', '[data-role="assistant"]',
+    '[data-author="user"]', '[data-author="assistant"]',
+    '[data-message-role="user"]', '[data-message-role="assistant"]',
+    '[data-author-role="user"]', '[data-author-role="assistant"]',
+    '[data-turn-role="user"]', '[data-turn-role="assistant"]',
+    '[data-message-author="user"]', '[data-message-author="assistant"]',
+    '[data-conversation-role="user"]', '[data-conversation-role="assistant"]',
+    '[data-turn="user"]', '[data-turn="assistant"]',
+    '[data-testid^="conversation-turn-"][data-turn="user"]',
+    '[data-testid^="conversation-turn-"][data-turn="assistant"]',
+    '[data-test-id^="conversation-turn-"][data-turn="user"]',
+    '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
+    'section[data-turn="user"]', 'section[data-turn="assistant"]',
+    '[data-chatgpt-search-unit-key$=":user"]', '[data-chatgpt-search-unit-key$=":assistant"]',
+    '[data-content-search-unit-key$=":user"]', '[data-content-search-unit-key$=":assistant"]',
+    '[data-markdown-text-style="assistant-message"]'
+  ].join(',');
+
   function messageNodes() {
-    if (provider === 'chatgpt') return Array.from(document.querySelectorAll('[data-message-author-role]'));
+    if (provider === 'chatgpt') return Array.from(document.querySelectorAll(CHATGPT_MESSAGE_SELECTORS));
     if (provider === 'gemini') return Array.from(document.querySelectorAll('user-query,model-response,[data-message-id]'));
     return Array.from(document.querySelectorAll('[data-message-author-role],[data-role],[data-author],[data-message-id],[data-testid*="message"],[class*="message"]'));
   }
 
   function roleOf(node) {
-    const source = node.matches('[data-message-author-role],[data-role],[data-author]')
-      ? node : node.querySelector('[data-message-author-role],[data-role],[data-author],[data-sender]') || node;
+    const marker = '[data-message-author-role],[data-role],[data-author],[data-sender],[data-turn],[data-turn-role],[data-author-role],[data-message-author],[data-conversation-role],[data-chatgpt-search-unit-key],[data-content-search-unit-key],[data-markdown-text-style]';
+    const source = node.matches(marker) ? node : node.querySelector(marker) || node;
     const hint = [
       source?.getAttribute('data-message-author-role'), source?.getAttribute('data-role'),
       source?.getAttribute('data-author'), source?.getAttribute('data-sender'),
-      source?.getAttribute('aria-label'), source?.getAttribute('data-testid'),
+      source?.getAttribute('data-turn'), source?.getAttribute('data-turn-role'),
+      source?.getAttribute('data-author-role'), source?.getAttribute('data-message-author'),
+      source?.getAttribute('data-conversation-role'), source?.getAttribute('data-chatgpt-search-unit-key'),
+      source?.getAttribute('data-content-search-unit-key'), source?.getAttribute('data-markdown-text-style'),
+      source?.getAttribute('aria-label'), source?.getAttribute('data-testid'), source?.getAttribute('data-test-id'),
       source?.tagName, source?.className?.baseVal || source?.className
-    ].join(' ').toLowerCase();
+    ].filter(Boolean).join(' ').toLowerCase();
     if (/user|human|user-query/.test(hint)) return 'user';
     if (/assistant|model|response/.test(hint)) return 'assistant';
     return '';

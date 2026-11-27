@@ -619,8 +619,26 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
       : location.hostname === 'chat.deepseek.com' ? 'deepseek'
       : location.hostname === 'chat.z.ai' ? 'zai' : ''
     if (!provider) throw new Error('The embedded page is not a supported AI chat provider')
+    const chatgptRoleMarkers = [
+      '[data-message-author-role]', '[data-role="user"]', '[data-role="assistant"]',
+      '[data-author="user"]', '[data-author="assistant"]',
+      '[data-message-role="user"]', '[data-message-role="assistant"]',
+      '[data-author-role="user"]', '[data-author-role="assistant"]',
+      '[data-turn-role="user"]', '[data-turn-role="assistant"]',
+      '[data-message-author="user"]', '[data-message-author="assistant"]',
+      '[data-conversation-role="user"]', '[data-conversation-role="assistant"]',
+      '[data-turn="user"]', '[data-turn="assistant"]',
+      '[data-testid^="conversation-turn-"][data-turn="user"]',
+      '[data-testid^="conversation-turn-"][data-turn="assistant"]',
+      '[data-test-id^="conversation-turn-"][data-turn="user"]',
+      '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
+      'section[data-turn="user"]', 'section[data-turn="assistant"]',
+      '[data-chatgpt-search-unit-key$=":user"]', '[data-chatgpt-search-unit-key$=":assistant"]',
+      '[data-content-search-unit-key$=":user"]', '[data-content-search-unit-key$=":assistant"]',
+      '[data-markdown-text-style="assistant-message"]'
+    ]
     const selectors = provider === 'chatgpt'
-      ? '[data-message-author-role]'
+      ? chatgptRoleMarkers.join(',')
       : provider === 'gemini'
         ? 'user-query, model-response, [data-message-id], [data-testid*="message"]'
         : provider === 'deepseek'
@@ -634,11 +652,19 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     }
     nodes = nodes.slice(-100)
     const messages = nodes.map((node, index) => {
-      const roleNode = node.matches('[data-message-author-role],[data-role],[data-author]')
-        ? node
-        : node.querySelector('[data-message-author-role],[data-role],[data-author],[data-sender]')
+      const roleMarkerSelector = '[data-message-author-role],[data-role],[data-author],[data-sender],[data-turn],[data-turn-role],[data-author-role],[data-message-author],[data-conversation-role],[data-chatgpt-search-unit-key],[data-content-search-unit-key],[data-markdown-text-style]'
+      const roleNode = node.matches(roleMarkerSelector) ? node : node.querySelector(roleMarkerSelector)
       const source = roleNode || node
-      const roleValue = String(source.getAttribute('data-message-author-role') || source.getAttribute('data-role') || source.getAttribute('data-author') || source.getAttribute('data-sender') || source.getAttribute('data-testid') || source.getAttribute('aria-label') || source.getAttribute('role') || source.tagName || '').toLowerCase()
+      const roleValue = [
+        source.getAttribute('data-message-author-role'), source.getAttribute('data-role'),
+        source.getAttribute('data-author'), source.getAttribute('data-sender'),
+        source.getAttribute('data-turn'), source.getAttribute('data-turn-role'),
+        source.getAttribute('data-author-role'), source.getAttribute('data-message-author'),
+        source.getAttribute('data-conversation-role'), source.getAttribute('data-chatgpt-search-unit-key'),
+        source.getAttribute('data-content-search-unit-key'), source.getAttribute('data-markdown-text-style'),
+        source.getAttribute('data-testid'), source.getAttribute('data-test-id'),
+        source.getAttribute('aria-label'), source.getAttribute('role'), source.tagName
+      ].filter(Boolean).join(' ').toLowerCase()
       const classes = String(source.className?.baseVal || source.className || '').toLowerCase()
       const role = /user|human|query/.test(roleValue + ' ' + classes) ? 'user'
         : /assistant|model|response/.test(roleValue + ' ' + classes) ? 'assistant' : ''
@@ -934,22 +960,28 @@ function startEmbeddedBrowserBridge() {
             && pending.origin === new URL(activeUrl).origin
             && Date.now() - pending.submittedAt < 120000
             ? String(pending.textPrefix || '').trim() : ''
+          const baselineAssistantTexts = new Set((pending?.baselineAssistantTexts || []).map(value =>
+            String(value || '').replace(/\s+/g, ' ').trim()
+          ))
+          const normalizeMessageText = value => String(value || '').replace(/\s+/g, ' ').trim()
           const companionUserIndex = expectedPendingText
             ? companionMessages.findLastIndex(item =>
-                item?.role === 'user' && String(item.text || '').includes(expectedPendingText))
+                item?.role === 'user' && normalizeMessageText(item.text).includes(expectedPendingText))
             : -1
+          const companionNewAssistantIndex = companionMessages.findIndex(item =>
+            item?.role === 'assistant' && normalizeMessageText(item.text)
+            && !baselineAssistantTexts.has(normalizeMessageText(item.text))
+          )
           const companionAssistantIndex = companionUserIndex >= 0
             ? companionMessages.findIndex((item, index) =>
-                index > companionUserIndex && item?.role === 'assistant' && String(item.text || '').trim())
-            : -1
-          // An empty or stale companion observation is not authoritative. In
-          // particular, don't let a healthy composer plus zero captured messages
-          // suppress the independent DOM/accessibility readers. After a send,
-          // use the companion only when it proves the exact new user turn and
-          // the assistant reply that follows it.
+                index > companionUserIndex && item?.role === 'assistant' && normalizeMessageText(item.text))
+            : companionNewAssistantIndex
+          // A matching user turn is preferred. Some ChatGPT app-shell builds expose
+          // a new assistant turn but omit the user role marker, so a reply whose
+          // content was absent from the pre-send baseline is valid evidence too.
           const companionHasCurrentTurn = !expectedPendingText
             ? companionMessages.length > 0
-            : companionUserIndex >= 0 && companionAssistantIndex > companionUserIndex
+            : companionAssistantIndex >= 0
               && companion.stable !== false && !companion.generating
           const useCompanionSnapshot = Boolean(companionMatches && companionHasCurrentTurn)
           let snapshot
@@ -1012,15 +1044,22 @@ function startEmbeddedBrowserBridge() {
             && Date.now() - pending.submittedAt < 120000) {
             const expected = String(pending.textPrefix || '').trim()
             const messages = Array.isArray(snapshot.messages) ? snapshot.messages : []
+            const normalizeMessageText = value => String(value || '').replace(/\s+/g, ' ').trim()
+            const baselineAssistantTexts = new Set((pending.baselineAssistantTexts || []).map(normalizeMessageText))
             const userIndex = messages.findLastIndex(item =>
-              item?.role === 'user' && expected && String(item.text || '').includes(expected)
+              item?.role === 'user' && expected && normalizeMessageText(item.text).includes(expected)
+            )
+            const newAssistantIndex = messages.findIndex(item =>
+              item?.role === 'assistant' && normalizeMessageText(item.text)
+              && !baselineAssistantTexts.has(normalizeMessageText(item.text))
             )
             const assistantIndex = userIndex >= 0
-              ? messages.findIndex((item, index) => index > userIndex && item?.role === 'assistant' && String(item.text || '').trim())
-              : -1
+              ? messages.findIndex((item, index) => index > userIndex && item?.role === 'assistant' && normalizeMessageText(item.text))
+              : newAssistantIndex
             const stable = snapshot.stable !== false
-            if (userIndex < 0 || assistantIndex < 0 || snapshot.generating || !stable) {
-              // Do not let a previous assistant turn satisfy the new request.
+            if (assistantIndex < 0 || snapshot.generating || !stable) {
+              // Prefer the exact user-turn relationship; otherwise require a newly
+              // rendered assistant message not present in the pre-send baseline.
               snapshot.generating = true
               snapshot.pendingSubmission = true
             } else {
@@ -1054,12 +1093,13 @@ function startEmbeddedBrowserBridge() {
           // this confirms a submit action instead of assuming Enter sent it.
           if (key === 'Enter' && ['chatgpt.com', 'chat.openai.com'].includes(new URL(webContents.getURL()).hostname)) {
             const submitted = await executeEmbeddedBrowserScript(webContents, `(() => {
-              const visible = (element) => {
+              const normalize = value => String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()
+              const visible = element => {
                 const rect = element.getBoundingClientRect()
                 const style = getComputedStyle(element)
                 return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
               }
-              const readValue = (element) => String(element?.value ?? element?.innerText ?? element?.textContent ?? '').trim()
+              const readValue = element => normalize(element?.value ?? element?.innerText ?? element?.textContent ?? '')
               const editable = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
                 .filter(element => visible(element) && !element.disabled)
               const preferred = editable.find(element =>
@@ -1070,15 +1110,55 @@ function startEmbeddedBrowserBridge() {
                 : populated.length === 1 ? populated[0] : null
               const text = readValue(composer)
               if (!text) return { submitted: false, reason: populated.length > 1 ? 'ambiguous_composer' : 'composer_empty' }
+              const userSelector = [
+                '[data-message-author-role="user"]', '[data-role="user"]', '[data-author="user"]',
+                '[data-message-role="user"]', '[data-author-role="user"]', '[data-turn-role="user"]',
+                '[data-message-author="user"]', '[data-conversation-role="user"]', '[data-turn="user"]',
+                '[data-testid^="conversation-turn-"][data-turn="user"]',
+                '[data-test-id^="conversation-turn-"][data-turn="user"]',
+                'section[data-turn="user"]', '[data-chatgpt-search-unit-key$=":user"]',
+                '[data-content-search-unit-key$=":user"]'
+              ].join(',')
+              const assistantSelector = [
+                '[data-message-author-role="assistant"]', '[data-role="assistant"]', '[data-author="assistant"]',
+                '[data-message-role="assistant"]', '[data-author-role="assistant"]', '[data-turn-role="assistant"]',
+                '[data-message-author="assistant"]', '[data-conversation-role="assistant"]', '[data-turn="assistant"]',
+                '[data-testid^="conversation-turn-"][data-turn="assistant"]',
+                '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
+                'section[data-turn="assistant"]', '[data-chatgpt-search-unit-key$=":assistant"]',
+                '[data-content-search-unit-key$=":assistant"]', '[data-markdown-text-style="assistant-message"]'
+              ].join(',')
+              const identity = (element, value) => String(
+                element.getAttribute('data-message-id') || element.getAttribute('data-testid')
+                || element.getAttribute('data-test-id') || element.getAttribute('data-turn-id')
+                || element.id || value
+              )
+              const collect = selector => Array.from(document.querySelectorAll(selector))
+                .filter(visible)
+                .map(element => {
+                  const content = element.querySelector('[data-message-content],.markdown,.message-content') || element
+                  const value = normalize(content.innerText || content.textContent)
+                  return { key: identity(element, value) + '|' + value, text: value }
+                }).filter(item => item.text)
+              const expectedPrefix = text.slice(0, 160)
+              const baselineUserSignatures = collect(userSelector)
+                .filter(item => item.text.includes(expectedPrefix)).map(item => item.key)
+              const baselineAssistantTexts = collect(assistantSelector).map(item => item.text)
               const sendSelector = 'button[data-testid="send-button"],button[aria-label*="Send" i],button[aria-label*="Send message" i]'
               const scopedButtons = composer.closest('form')
                 ? Array.from(composer.closest('form').querySelectorAll(sendSelector)) : []
               const allButtons = Array.from(document.querySelectorAll(sendSelector))
               const send = [...new Set([...scopedButtons, ...allButtons])]
                 .find(element => visible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true')
-              if (!send) return { submitted: false, reason: 'send_button_unavailable', submittedTextPrefix: text.slice(0, 160) }
+              if (!send) return {
+                submitted: false, reason: 'send_button_unavailable', submittedTextPrefix: expectedPrefix,
+                baselineUserSignatures, baselineAssistantTexts
+              }
               send.click()
-              return { submitted: true, method: 'send_button', submittedTextPrefix: text.slice(0, 160) }
+              return {
+                submitted: true, method: 'send_button', submittedTextPrefix: expectedPrefix,
+                baselineUserSignatures, baselineAssistantTexts
+              }
             })()`)
             if (submitted?.reason === 'composer_empty' || submitted?.reason === 'ambiguous_composer') {
               return send(409, {
@@ -1090,54 +1170,96 @@ function startEmbeddedBrowserBridge() {
             }
             let submissionMethod = submitted?.method || ''
             if (!submitted?.submitted && submitted?.reason === 'send_button_unavailable') {
-              // Native Enter is only a fallback attempt; it is not considered
-              // successful until the provider clears the composer.
+              // Native Enter is a fallback only; success is confirmed from new
+              // rendered conversation content, not the composer becoming empty.
               sendNativeKey(webContents, key)
               submissionMethod = 'native_enter'
             } else if (!submitted?.submitted) {
               return send(409, { error: 'ChatGPT did not expose a verifiable send action.' })
             }
-            const deadline = Date.now() + 5000
+            const deadline = Date.now() + 15000
             while (Date.now() < deadline) {
               const expectedPrefix = String(submitted?.submittedTextPrefix || '').slice(0, 160)
+              const baselineUserSignatures = Array.isArray(submitted?.baselineUserSignatures)
+                ? submitted.baselineUserSignatures : []
+              const baselineAssistantTexts = Array.isArray(submitted?.baselineAssistantTexts)
+                ? submitted.baselineAssistantTexts : []
               const state = await executeEmbeddedBrowserScript(webContents, `(() => {
                 const expectedPrefix = ${JSON.stringify(expectedPrefix)}
-                const visible = (element) => {
+                const baselineUserSignatures = new Set(${JSON.stringify(baselineUserSignatures)})
+                const baselineAssistantTexts = new Set(${JSON.stringify(baselineAssistantTexts)})
+                const normalize = value => String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()
+                const visible = element => {
                   const rect = element.getBoundingClientRect()
                   const style = getComputedStyle(element)
                   return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
                 }
+                const userSelector = [
+                  '[data-message-author-role="user"]', '[data-role="user"]', '[data-author="user"]',
+                  '[data-message-role="user"]', '[data-author-role="user"]', '[data-turn-role="user"]',
+                  '[data-message-author="user"]', '[data-conversation-role="user"]', '[data-turn="user"]',
+                  '[data-testid^="conversation-turn-"][data-turn="user"]',
+                  '[data-test-id^="conversation-turn-"][data-turn="user"]',
+                  'section[data-turn="user"]', '[data-chatgpt-search-unit-key$=":user"]',
+                  '[data-content-search-unit-key$=":user"]'
+                ].join(',')
+                const assistantSelector = [
+                  '[data-message-author-role="assistant"]', '[data-role="assistant"]', '[data-author="assistant"]',
+                  '[data-message-role="assistant"]', '[data-author-role="assistant"]', '[data-turn-role="assistant"]',
+                  '[data-message-author="assistant"]', '[data-conversation-role="assistant"]', '[data-turn="assistant"]',
+                  '[data-testid^="conversation-turn-"][data-turn="assistant"]',
+                  '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
+                  'section[data-turn="assistant"]', '[data-chatgpt-search-unit-key$=":assistant"]',
+                  '[data-content-search-unit-key$=":assistant"]', '[data-markdown-text-style="assistant-message"]'
+                ].join(',')
+                const identity = (element, value) => String(
+                  element.getAttribute('data-message-id') || element.getAttribute('data-testid')
+                  || element.getAttribute('data-test-id') || element.getAttribute('data-turn-id')
+                  || element.id || value
+                )
+                const collect = selector => Array.from(document.querySelectorAll(selector))
+                  .filter(visible)
+                  .map(element => {
+                    const content = element.querySelector('[data-message-content],.markdown,.message-content') || element
+                    const text = normalize(content.innerText || content.textContent)
+                    return { key: identity(element, text) + '|' + text, text }
+                  }).filter(item => item.text)
                 const composers = Array.from(document.querySelectorAll('#prompt-textarea,[data-testid="prompt-textarea"],textarea,[contenteditable="true"],[role="textbox"]'))
                   .filter(element => visible(element) && !element.disabled)
                 const composer = composers.find(element => element.id === 'prompt-textarea' || element.getAttribute('data-testid') === 'prompt-textarea')
                   || composers[0]
-                const value = composer ? String(composer.value ?? composer.innerText ?? composer.textContent ?? '').trim() : ''
-                const userMessageVisible = Boolean(expectedPrefix) && Array.from(
-                  document.querySelectorAll('[data-message-author-role="user"]')
-                ).some(element => String(element.innerText || element.textContent || '').includes(expectedPrefix))
-                return { composerFound: Boolean(composer), composerEmpty: Boolean(composer) && !value, userMessageVisible }
+                const value = composer ? normalize(composer.value ?? composer.innerText ?? composer.textContent) : ''
+                const userMessageVisible = Boolean(expectedPrefix) && collect(userSelector)
+                  .some(item => item.text.includes(expectedPrefix) && !baselineUserSignatures.has(item.key))
+                const assistantMessageVisible = collect(assistantSelector)
+                  .some(item => !baselineAssistantTexts.has(item.text))
+                return {
+                  composerFound: Boolean(composer),
+                  composerEmpty: Boolean(composer) && !value,
+                  userMessageVisible,
+                  assistantMessageVisible
+                }
               })()`)
-              if (state?.userMessageVisible) {
-                // The provider rendering the exact submitted user message is
-                // the authoritative send acknowledgement. Composer clearing is
-                // deliberately diagnostic only: some provider builds retain
-                // draft text after accepting a message.
+              if (state?.userMessageVisible || state?.assistantMessageVisible) {
                 embeddedBrowserPendingSubmission = {
                   provider: 'chatgpt',
                   origin: new URL(webContents.getURL()).origin,
                   textPrefix: expectedPrefix,
+                  baselineAssistantTexts,
                   submittedAt: Date.now(),
                 }
                 return send(200, {
                   ok: true, action: 'press_key', key,
-                  submitted: true, submissionVerified: true, composerEmpty: Boolean(state.composerEmpty),
+                  submitted: true, submissionVerified: true,
+                  submissionEvidence: state.userMessageVisible ? 'rendered_user_turn' : 'new_assistant_reply',
+                  composerEmpty: Boolean(state.composerEmpty),
                   method: submissionMethod,
                 })
               }
               await new Promise(resolve => setTimeout(resolve, 150))
             }
             return send(409, {
-              error: 'ChatGPT did not clear its composer after the send attempt; message submission was not confirmed.',
+              error: 'ChatGPT did not expose the submitted user turn or a new assistant reply after the send attempt.',
               code: 'chatgpt_submission_unconfirmed',
             })
           }

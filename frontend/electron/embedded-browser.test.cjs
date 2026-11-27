@@ -92,9 +92,12 @@ test('embedded conversation endpoint returns provider-aware structured messages'
   assert.match(main, /executeEmbeddedBrowserScript\(embeddedBrowserView\.webContents, script\)/)
 })
 
-test('embedded ChatGPT conversation detection has safe fallbacks and precise generation state', () => {
+test('embedded ChatGPT conversation detection recognizes app-shell turn roles and safe fallbacks', () => {
   assert.match(main, /article,\[data-testid\^="conversation-turn-"\]/)
-  assert.match(main, /node\.querySelector\('\[data-message-author-role\]/)
+  assert.match(main, /data-turn="user"/)
+  assert.match(main, /data-turn="assistant"/)
+  assert.match(main, /data-markdown-text-style="assistant-message"/)
+  assert.match(main, /node\.querySelector\(roleMarkerSelector\)/)
   assert.match(main, /button\[data-testid\*="stop"\]/)
   assert.match(main, /data-is-streaming/)
   assert.match(main, /const contextLimit = \/conversation is too long/)
@@ -127,7 +130,7 @@ test('ChatGPT response capture uses the complete legacy-style accessibility tree
 
 })
 
-test('ChatGPT Enter confirms submission by observing the composer clear', () => {
+test('ChatGPT Enter confirms a newly rendered user turn or a new assistant reply', () => {
   assert.match(main, /button\[data-testid="send-button"\]/)
   assert.match(main, /button\[aria-label\*="Send" i\]/)
   assert.match(main, /send\.click\(\)/)
@@ -138,9 +141,12 @@ test('ChatGPT Enter confirms submission by observing the composer clear', () => 
   assert.match(main, /getAttribute\('data-testid'\) === 'prompt-textarea'/)
   assert.match(main, /const populated = editable\.filter\(element => readValue\(element\)\)/)
   assert.match(main, /composer\.closest\('form'\)/)
-  assert.match(main, /querySelectorAll\('\[data-message-author-role="user"\]'\)/)
-  assert.match(main, /state\?\.userMessageVisible/)
-  assert.doesNotMatch(main, /visiblePageText\.includes\(expectedPrefix\)/)
+  assert.match(main, /baselineUserSignatures/)
+  assert.match(main, /baselineAssistantTexts/)
+  assert.match(main, /state\?\.userMessageVisible \|\| state\?\.assistantMessageVisible/)
+  assert.match(main, /new_assistant_reply/)
+  assert.match(main, /Date\.now\(\) \+ 15000/)
+  assert.doesNotMatch(main, /did not clear its composer after the send attempt/)
 })
 
 test('ChatGPT accessibility capture excludes editable composer subtrees and weak role hints', () => {
@@ -303,9 +309,12 @@ test('companion service worker and provider observer are valid JavaScript', () =
 })
 
 
-test('companion role detection falls back to provider message elements such as Gemini user-query and model-response', () => {
+test('companion role detection supports ChatGPT app-shell user and assistant turns', () => {
   const content = fs.readFileSync(path.join(__dirname, '../../browser-companion/content.js'), 'utf8')
-  assert.match(content, /node\.querySelector\('\[data-message-author-role\],\[data-role\],\[data-author\],\[data-sender\]'\) \|\| node/)
+  assert.match(content, /node\.querySelector\(marker\) \|\| node/)
+  assert.match(content, /data-turn="user"/)
+  assert.match(content, /data-turn="assistant"/)
+  assert.match(content, /data-markdown-text-style="assistant-message"/)
   assert.match(content, /user-query/)
   assert.match(content, /model-response/)
 })
