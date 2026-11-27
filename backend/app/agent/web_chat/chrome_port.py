@@ -106,11 +106,11 @@ class ChromeWebChatBrowserPort:
         pages_text = self._result_text(result)
         matches: list[tuple[int, str, str]] = []
         for line in pages_text.splitlines():
-            match = re.match(r"^\\s*(\\d+):\\s*(.*?)\\s*$", line)
+            match = re.match(r"^\s*(\d+):\s*(.*?)\s*$", line)
             if not match:
                 continue
             page_id = int(match.group(1))
-            url_match = re.search(r"https?://[^\\s)]+", match.group(2))
+            url_match = re.search(r"https?://[^\s)]+", match.group(2))
             if not url_match:
                 continue
             url = url_match.group(0).rstrip(".,;")
