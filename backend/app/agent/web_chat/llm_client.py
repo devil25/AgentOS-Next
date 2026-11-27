@@ -20,7 +20,7 @@ class WebChatLLMClient:
         adapter: WebChatSessionAdapter,
         *,
         provider: str,
-        tab_id: int,
+        tab_id: int | None,
         model_name: str | None = None,
         run_id: str = "",
         conversation_url: str = "",
@@ -33,7 +33,7 @@ class WebChatLLMClient:
         self.reasoning_effort = "provider_default"
         self.supports_vision = False
         self.adapter = adapter
-        self.tab_id = int(tab_id)
+        self.tab_id = int(tab_id) if tab_id is not None else None
         self._last_action_id = ""
         self._conversation_url = str(conversation_url or "")
         self.run_id = str(run_id or "")
@@ -42,7 +42,7 @@ class WebChatLLMClient:
 
     def bind_durable_run(self, durable_run) -> None:
         """Persist the selected website/page as soon as the durable Run exists."""
-        if not self.run_id:
+        if not self.run_id or self.tab_id is None:
             return
         durable_run_id = str(getattr(durable_run, "run_id", "") or "")
         if durable_run_id != self.run_id:
@@ -127,6 +127,7 @@ class WebChatLLMClient:
                 tab_id=self.tab_id, prompt=prompt, expected_provider=self.web_chat_provider,
                 expected_conversation_url=self._conversation_url,
             )
+            self.tab_id = int(turn.tab_id)
             returned_url = str(getattr(turn, "conversation_url", "") or "")
             if self._conversation_url and returned_url:
                 from .adapter import WebChatSessionAdapter
