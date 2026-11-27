@@ -100,8 +100,8 @@ async def test_embedded_port_refuses_ambiguous_new_chat_controls():
             return _tool_result({"ok": True, "provider": "chatgpt",
                 "url": "https://chatgpt.com/c/old", "messages": [], "composerReady": True})
         return _tool_result({"ok": True, "elements": [
-            {"index": 1, "label": "New chat"},
-            {"index": 2, "text": "New chat"},
+            {"index": 1, "tag": "button", "label": "New chat"},
+            {"index": 2, "role": "button", "text": "New chat"},
         ]})
 
     port = EmbeddedWebChatBrowserPort("chatgpt", execute)
