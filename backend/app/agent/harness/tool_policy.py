@@ -121,6 +121,10 @@ class ToolPolicy:
 
     @staticmethod
     def _is_repeat_safe(tool_name: str, arguments: dict, tool: dict | None = None) -> bool:
+        # A conversation read is safe but not useful to repeat unchanged. Keep
+        # it under the ordinary identical-call budget to prevent endless polling.
+        if tool_name == "embedded_browser_conversation":
+            return False
         metadata = (tool or {}).get("metadata", {}) or {}
         if bool(metadata.get("repeat_safe")):
             return True
