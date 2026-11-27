@@ -702,3 +702,31 @@ def test_recovery_input_is_checkpointed_before_effects_and_finalized_once(tmp_pa
         "SELECT COUNT(*) FROM messages WHERE conversation_id = ?", (created["conversation_id"],)
     )[0] == 2
     db.close()
+
+
+def test_delete_conversation_discards_only_clean_paused_recovery_run(tmp_path):
+    """Deleting a conversation may discard a safe paused checkpoint, not unresolved effects."""
+    db = _new_database(tmp_path / "agent.db")
+    journal = Journal(db)
+    created = _create_run(journal)
+    _commit_resume_input(db, created)
+    pausing = journal.transition_run(
+        created["run_id"],
+        owner_instance_id="owner-a",
+        attempt=created["attempt"],
+        to_status="pausing",
+        expected_revision=created["revision"],
+    )
+    paused = journal.transition_run(
+        created["run_id"],
+        owner_instance_id="owner-a",
+        attempt=created["attempt"],
+        to_status="paused",
+        expected_revision=pausing["revision"],
+        recovery_input_ref=f"turn_checkpoint:{created['turn_id']}",
+    )
+    assert paused["status"] == "paused"
+
+    assert db.delete_conversation("journal-chat") is True
+    assert db.get_conversation("journal-chat") is None
+    assert db.fetchone("SELECT 1 FROM agent_runs WHERE run_id = ?", (created["run_id"],)) is None

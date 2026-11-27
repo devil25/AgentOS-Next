@@ -928,8 +928,32 @@ function startEmbeddedBrowserBridge() {
             && Date.now() - companion.observedAt < 30000
             && companion.provider === embeddedBrowserProvider
             && new URL(companion.url).origin === new URL(activeUrl).origin
+          const pending = embeddedBrowserPendingSubmission
+          const companionMessages = Array.isArray(companion?.messages) ? companion.messages : []
+          const expectedPendingText = pending && pending.provider === embeddedBrowserProvider
+            && pending.origin === new URL(activeUrl).origin
+            && Date.now() - pending.submittedAt < 120000
+            ? String(pending.textPrefix || '').trim() : ''
+          const companionUserIndex = expectedPendingText
+            ? companionMessages.findLastIndex(item =>
+                item?.role === 'user' && String(item.text || '').includes(expectedPendingText))
+            : -1
+          const companionAssistantIndex = companionUserIndex >= 0
+            ? companionMessages.findIndex((item, index) =>
+                index > companionUserIndex && item?.role === 'assistant' && String(item.text || '').trim())
+            : -1
+          // An empty or stale companion observation is not authoritative. In
+          // particular, don't let a healthy composer plus zero captured messages
+          // suppress the independent DOM/accessibility readers. After a send,
+          // use the companion only when it proves the exact new user turn and
+          // the assistant reply that follows it.
+          const companionHasCurrentTurn = !expectedPendingText
+            ? companionMessages.length > 0
+            : companionUserIndex >= 0 && companionAssistantIndex > companionUserIndex
+              && companion.stable !== false && !companion.generating
+          const useCompanionSnapshot = Boolean(companionMatches && companionHasCurrentTurn)
           let snapshot
-          if (companionMatches) {
+          if (useCompanionSnapshot) {
             snapshot = { ...companion, companionObservedAt: companion.observedAt }
           } else {
             const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
@@ -983,7 +1007,6 @@ function startEmbeddedBrowserBridge() {
           } else if (snapshot.captureSource !== 'extension_companion') {
             snapshot.captureSource = 'dom'
           }
-          const pending = embeddedBrowserPendingSubmission
           if (pending && pending.provider === snapshot.provider
             && pending.origin === new URL(activeUrl).origin
             && Date.now() - pending.submittedAt < 120000) {

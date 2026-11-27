@@ -177,7 +177,7 @@ class Database:
                    WHERE r.conversation_id = ?
                      AND (
                        r.status IN (
-                           'running', 'waiting_approval', 'pausing', 'paused',
+                           'running', 'waiting_approval', 'pausing',
                            'interrupted', 'needs_review'
                        )
                        OR EXISTS (
