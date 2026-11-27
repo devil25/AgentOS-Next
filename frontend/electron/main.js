@@ -899,18 +899,34 @@ function startEmbeddedBrowserBridge() {
                 const style = getComputedStyle(element)
                 return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
               }
-              const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
-                .find(element => visible(element) && !element.disabled)
-              const text = composer ? String(composer.value ?? composer.innerText ?? composer.textContent ?? '').trim() : ''
-              if (!text) return { submitted: false, reason: 'composer_empty' }
-              const send = Array.from(document.querySelectorAll('button[data-testid="send-button"],button[aria-label*="Send" i],button[aria-label*="Send message" i]'))
+              const readValue = (element) => String(element?.value ?? element?.innerText ?? element?.textContent ?? '').trim()
+              const editable = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
+                .filter(element => visible(element) && !element.disabled)
+              const preferred = editable.find(element =>
+                element.id === 'prompt-textarea' || element.getAttribute('data-testid') === 'prompt-textarea'
+              )
+              const populated = editable.filter(element => readValue(element))
+              const composer = preferred && readValue(preferred) ? preferred
+                : populated.length === 1 ? populated[0] : null
+              const text = readValue(composer)
+              if (!text) return { submitted: false, reason: populated.length > 1 ? 'ambiguous_composer' : 'composer_empty' }
+              const sendSelector = 'button[data-testid="send-button"],button[aria-label*="Send" i],button[aria-label*="Send message" i]'
+              const scopedButtons = composer.closest('form')
+                ? Array.from(composer.closest('form').querySelectorAll(sendSelector)) : []
+              const allButtons = Array.from(document.querySelectorAll(sendSelector))
+              const send = [...new Set([...scopedButtons, ...allButtons])]
                 .find(element => visible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true')
               if (!send) return { submitted: false, reason: 'send_button_unavailable', submittedTextPrefix: text.slice(0, 160) }
               send.click()
               return { submitted: true, method: 'send_button', submittedTextPrefix: text.slice(0, 160) }
             })()`)
-            if (submitted?.reason === 'composer_empty') {
-              return send(409, { error: 'The ChatGPT composer is empty; no message was submitted.' })
+            if (submitted?.reason === 'composer_empty' || submitted?.reason === 'ambiguous_composer') {
+              return send(409, {
+                error: submitted.reason === 'ambiguous_composer'
+                  ? 'Multiple populated ChatGPT editors were found; no message was submitted.'
+                  : 'The ChatGPT composer is empty; no message was submitted.',
+                code: submitted.reason,
+              })
             }
             let submissionMethod = submitted?.method || ''
             if (!submitted?.submitted && submitted?.reason === 'send_button_unavailable') {
@@ -931,11 +947,14 @@ function startEmbeddedBrowserBridge() {
                   const style = getComputedStyle(element)
                   return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
                 }
-                const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
-                  .find(element => visible(element) && !element.disabled)
+                const composers = Array.from(document.querySelectorAll('#prompt-textarea,[data-testid="prompt-textarea"],textarea,[contenteditable="true"],[role="textbox"]'))
+                  .filter(element => visible(element) && !element.disabled)
+                const composer = composers.find(element => element.id === 'prompt-textarea' || element.getAttribute('data-testid') === 'prompt-textarea')
+                  || composers[0]
                 const value = composer ? String(composer.value ?? composer.innerText ?? composer.textContent ?? '').trim() : ''
-                const visiblePageText = String(document.body?.innerText || '')
-                const userMessageVisible = Boolean(expectedPrefix) && visiblePageText.includes(expectedPrefix)
+                const userMessageVisible = Boolean(expectedPrefix) && Array.from(
+                  document.querySelectorAll('[data-message-author-role="user"]')
+                ).some(element => String(element.innerText || element.textContent || '').includes(expectedPrefix))
                 return { composerFound: Boolean(composer), composerEmpty: Boolean(composer) && !value, userMessageVisible }
               })()`)
               if (state?.composerFound && state?.composerEmpty && state?.userMessageVisible) {
