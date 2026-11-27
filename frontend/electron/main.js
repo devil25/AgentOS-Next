@@ -723,7 +723,12 @@ app.whenReady().then(async () => {
     return
   }
   if (!currentBackendLaunch().frozen) backendUvCommand = await pickBackendUv()
-  await startEmbeddedBrowserBridge()
+  try {
+    await startEmbeddedBrowserBridge()
+  } catch (error) {
+    console.error('[embedded-browser] Local read bridge unavailable:', error.message)
+    stopEmbeddedBrowserBridge()
+  }
   spawnBackend()
   createWindow()
 
