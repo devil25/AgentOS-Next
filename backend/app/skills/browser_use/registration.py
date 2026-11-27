@@ -3,7 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from .tools import (\n    browser_fetch, embedded_browser_click, embedded_browser_navigate, embedded_browser_press_key,\n    embedded_browser_read, embedded_browser_snapshot, embedded_browser_type,\n)
+from .tools import (
+    browser_fetch, embedded_browser_click, embedded_browser_navigate, embedded_browser_press_key,
+    embedded_browser_read, embedded_browser_snapshot, embedded_browser_type,
+)
 
 
 def _configured_allowed_domains(settings: Any) -> list[str]:
