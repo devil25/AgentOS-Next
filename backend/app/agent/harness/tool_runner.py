@@ -377,6 +377,8 @@ class ToolBatchRunner:
         )
         raw_tool_output, status, recovery_prompt = guarded.output, guarded.status, guarded.recovery_prompt
         self.pause = guarded.pause or self.pause
+        if status == "ok":
+            self.policy.note_successful_page_action(tool_name)
         self.ledger.record_output(prepared.active_key, raw_tool_output, status)
         active_call = self.ledger.get(prepared.active_key)
         image_attachments = extract_image_attachments(tool_name, raw_tool_output)
