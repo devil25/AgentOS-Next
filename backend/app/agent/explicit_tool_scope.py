@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 _TOOL_TOKEN = r"[A-Za-z][A-Za-z0-9_.:-]*"
 _PATTERNS = (
-    re.compile(r"""\b(?:use|using|call|invoke|execute)\s+(?:(?:the|only)\s+)?(?:tool\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+only\b""", re.IGNORECASE),
+    re.compile(rf"""\b(?:use|using|call|invoke|execute)\s+(?:(?:the|only)\s+)?(?:tool\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+only\b""", re.IGNORECASE),
     re.compile(r"""\bonly\s+(?:use|call|invoke|execute)\s+(?:(?:the)\s+)?(?:tool\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?""", re.IGNORECASE),
 )
 _ARABIC_PATTERN = re.compile(r"""(?:استخدم|استعمل|نفّذ|نفذ)\s+(?:(?:الأداة|أداة)\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+فقط""")
