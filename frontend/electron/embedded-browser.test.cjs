@@ -89,6 +89,15 @@ test('embedded ChatGPT conversation detection has safe fallbacks and precise gen
   assert.doesNotMatch(main, /document\.querySelector\('\[aria-busy="true",\[data-testid\*="stop"/)
 })
 
+test('ChatGPT Enter submits through the enabled Send button when available', () => {
+  assert.match(main, /button\[data-testid="send-button"\]/)
+  assert.match(main, /button\[aria-label\*="Send" i\]/)
+  assert.match(main, /send\.click\(\)/)
+  assert.match(main, /submitted: true, method: 'send_button'/)
+  assert.match(main, /composer_empty/)
+  assert.match(main, /unverified_native_enter/)
+})
+
 test('embedded browser text entry and Enter use native Electron input events', () => {
   const events = []
   const webContents = {
