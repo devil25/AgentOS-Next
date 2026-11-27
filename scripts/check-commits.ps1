@@ -181,7 +181,7 @@ try {
         }
         if ($knownHistoricalFailures.ContainsKey($short)) {
             $reason = $knownHistoricalFailures[$short]
-            Write-Warning "Grandfathering known historical commit $short: $reason"
+            Write-Warning "Grandfathering known historical commit ${short}: $reason"
             $results.Add([pscustomobject]@{
                 Commit  = $short
                 Subject = $subject
