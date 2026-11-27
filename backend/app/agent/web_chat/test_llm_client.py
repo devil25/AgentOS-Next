@@ -462,6 +462,8 @@ async def test_web_chat_client_stops_consecutive_identical_conversation_reads_wi
     }
     second = await client.chat_with_tools(messages=[user, result_one], tools=tools)
     assert second.finish_reason == "tool_calls"
+    assert "Do not call embedded_browser_conversation again" in adapter.prompts[1][1]
+    assert "pageText=answer" in adapter.prompts[1][1]
     result_two = {
         "role": "user",
         "content": "AgentOS tool result: same pageText=answer",
