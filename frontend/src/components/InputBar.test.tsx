@@ -134,8 +134,11 @@ describe('InputBar model picker', () => {
     />)
     fireEvent.click(screen.getByRole('button', { name: 'Reasoning engine' }))
     fireEvent.click(screen.getByRole('option', { name: 'Gemini website' }))
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Chrome page ID' }), { target: { value: 'abc' } })
+    const pageId = screen.getByRole('spinbutton', { name: 'Chrome page ID' })
+    fireEvent.change(pageId, { target: { value: '0' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Use Gemini' } })
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    fireEvent.change(pageId, { target: { value: 'abc' } })
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
   })
 
