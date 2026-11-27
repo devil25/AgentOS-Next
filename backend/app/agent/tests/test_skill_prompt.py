@@ -31,6 +31,8 @@ def test_build_skill_prompt_steers_interactive_browsing_to_devtools_tools():
     assert "take_snapshot` again to verify" in prompt
     assert "`browser_fetch`" in prompt
     assert "stalled_repeat_detected" in prompt
+    assert "Explicit user scope takes precedence over this workflow" in prompt
+    assert "Once the requested tool returns, stop and report its result" in prompt
     assert "recipient chip/token" in prompt
     assert "Do not repeat the same browser action" in prompt
     assert "needs_browser_render" in prompt
