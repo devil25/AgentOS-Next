@@ -18,10 +18,10 @@ class ConversationHistory:
 
     def list(
         self, *, limit: int | None = None, offset: int = 0, search: str = "",
-        before_updated_at: str = "", before_id: str = "",
+        before_updated_at: str = "", before_id: str = "", deleted_only: bool = False,
     ) -> list[dict]:
-        """Find literal substrings with FTS and paginate by stable activity order."""
-        clauses = []
+        """Find live or trashed rows with FTS and stable activity pagination."""
+        clauses = ["c.deleted_at IS NOT NULL" if deleted_only else "c.deleted_at IS NULL"]
         params: list = []
         query = search.strip()
         if len(query) >= 3 and "\x00" not in query:
