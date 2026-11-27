@@ -179,10 +179,20 @@ class WebChatLLMClient:
             catalog = _select_web_chat_tool_catalog(tools, goal) if tools and goal else []
             if latest_result is not None:
                 result_text = str(latest_result.get("content") or "")
-                prompt = (
-                    "Continue the same task using this actual AgentOS execution result:\n"
-                    + result_text + "\n\n" + action_instruction()
-                )
+                if "AgentOS tool result for embedded_browser_conversation:" in result_text:
+                    prompt = (
+                        "AgentOS has already read the active browser conversation. Inspect the captured "
+                        "messages and pageText below. When they contain the assistant's answer to the "
+                        "latest user prompt, return that answer as your final response. Do not call "
+                        "embedded_browser_conversation again unless a new browser action has changed "
+                        "the page. If capture evidence is empty, explain that limitation instead of polling.\n\n"
+                        + result_text + "\n\n" + action_instruction()
+                    )
+                else:
+                    prompt = (
+                        "Continue the same task using this actual AgentOS execution result:\n"
+                        + result_text + "\n\n" + action_instruction()
+                    )
             else:
                 if not goal:
                     raise RuntimeError("The web-chat provider did not receive a user task.")
