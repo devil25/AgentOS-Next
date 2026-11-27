@@ -13,7 +13,7 @@ import re
 from typing import Any, Awaitable, Protocol
 
 from .adapter import AssistantMessage, ConversationSnapshot, WebChatAdapterError
-from .protocol import provider_for_url
+from .protocol import normalize_provider_url, provider_for_url
 
 
 class AuthorizedBrowserToolExecutor(Protocol):
@@ -135,7 +135,7 @@ class ChromeWebChatBrowserPort:
             tab_id = await self._resolve_page_id()
         self.resolved_page_id = tab_id
         value = self._decode_json(await self._call("inspect_web_chat", {"pageId": tab_id}))
-        url = str(value.get("url") or "")
+        url = normalize_provider_url(str(value.get("url") or ""))
         if provider_for_url(url) is None:
             raise WebChatAdapterError(str(value.get("blockedReason") or "The selected tab is not a supported HTTPS provider."))
         messages = tuple(
