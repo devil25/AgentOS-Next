@@ -618,13 +618,13 @@ async def embedded_browser_click(*, index: int) -> str:
         return _json_output({"ok": False, "error": str(exc)[:300]})
 
 
-async def embedded_browser_type(*, index: int, text: str) -> str:
+async def embedded_browser_type(*, index: int, text: str, append: bool = False) -> str:
     """Replace text in a visible, non-password editable field."""
     value = str(text or "")
     if len(value) > 4000:
         return _json_output({"ok": False, "error": "Text is too long (maximum 4000 characters)."})
     try:
-        payload = await _embedded_browser_request("/v1/action", {"action": "type", "index": int(index), "text": value})
+        payload = await _embedded_browser_request("/v1/action", {"action": "type", "index": int(index), "text": value, "append": bool(append)})
         return _json_output({"ok": True, **payload})
     except Exception as exc:
         return _json_output({"ok": False, "error": str(exc)[:300]})
