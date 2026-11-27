@@ -925,6 +925,7 @@ function startEmbeddedBrowserBridge() {
             while (Date.now() < deadline) {
               const expectedPrefix = String(submitted?.submittedTextPrefix || '').slice(0, 160)
               const state = await executeEmbeddedBrowserScript(webContents, `(() => {
+                const expectedPrefix = ${JSON.stringify(expectedPrefix)}
                 const visible = (element) => {
                   const rect = element.getBoundingClientRect()
                   const style = getComputedStyle(element)
