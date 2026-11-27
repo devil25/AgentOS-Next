@@ -121,6 +121,31 @@ async def test_turn_classifies_explicit_provider_context_limit_without_retrying(
 
 
 @pytest.mark.anyio
+async def test_turn_allows_chatgpt_home_url_to_become_new_conversation_after_submit():
+    new = AssistantMessage("new", "The requested response", True)
+    browser = FakeBrowser([
+        snapshot([], url="https://chatgpt.com/"),
+        snapshot([new], url="https://chatgpt.com/c/newly-created"),
+        snapshot([new], url="https://chatgpt.com/c/newly-created"),
+    ])
+    persisted = []
+    adapter = WebChatSessionAdapter(
+        browser, poll_interval=0.1, timeout=5, stable_polls=2,
+        on_conversation_url=persisted.append,
+    )
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Say hello", expected_provider="chatgpt",
+        expected_conversation_url="https://chatgpt.com/",
+    )
+    assert turn.assistant_message.text == "The requested response"
+    assert turn.conversation_url == "https://chatgpt.com/c/newly-created"
+    assert persisted == [
+        "https://chatgpt.com/",
+        "https://chatgpt.com/c/newly-created",
+    ]
+
+
+@pytest.mark.anyio
 async def test_turn_rejects_conversation_switch_after_submission():
     old = AssistantMessage("old", "Earlier response", True)
     browser = FakeBrowser([
