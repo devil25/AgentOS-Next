@@ -545,6 +545,7 @@ const EMBEDDED_PAGE_INSPECTION_SCRIPT = `(() => {
 let embeddedBrowserBridgeServer = null
 let embeddedBrowserBridgePort = 0
 const EMBEDDED_BROWSER_BRIDGE_SECRET = generateControlSecret()
+const EMBEDDED_BROWSER_ISOLATED_WORLD_ID = 1337
 
 const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
   const visible = (element) => {
@@ -636,9 +637,36 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
   throw new Error('Unsupported embedded browser action')
 }`
 
+async function executeEmbeddedBrowserScript(webContents, code) {
+  if (!webContents || webContents.isDestroyed()) throw new Error('The embedded browser is not open')
+  if (typeof webContents.executeJavaScriptInIsolatedWorld !== 'function') {
+    throw new Error('This Electron runtime does not support isolated-world browser inspection')
+  }
+  const wrapped = `(() => {
+    try {
+      const value = (${String(code)})
+      return { __agentosScriptOk: true, value }
+    } catch (error) {
+      return { __agentosScriptOk: false, error: {
+        name: String(error?.name || 'Error').slice(0, 80),
+        message: String(error?.message || error || 'Provider page script failed').slice(0, 500)
+      } }
+    }
+  })()`
+  const result = await webContents.executeJavaScriptInIsolatedWorld(
+    EMBEDDED_BROWSER_ISOLATED_WORLD_ID,
+    [{ code: wrapped }],
+    true,
+  )
+  if (!result || result.__agentosScriptOk !== true) {
+    throw new Error(String(result?.error?.message || 'The provider page did not return a script result; it may be navigating.'))
+  }
+  return result.value
+}
+
 async function inspectEmbeddedBrowserPage() {
   if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
-  const result = await embeddedBrowserView.webContents.executeJavaScript(EMBEDDED_PAGE_INSPECTION_SCRIPT, true)
+  const result = await executeEmbeddedBrowserScript(embeddedBrowserView.webContents, EMBEDDED_PAGE_INSPECTION_SCRIPT)
   return { ...result, url: embeddedSafeUrl(embeddedBrowserView.webContents.getURL()) }
 }
 
@@ -779,12 +807,13 @@ function startEmbeddedBrowserBridge() {
         body += chunk.toString('utf8')
         if (body.length > 16 * 1024) return send(413, { error: 'Request too large' })
       }
+      let requestAction = ''
       try {
         if (request.url === '/v1/inspect') return send(200, await inspectEmbeddedBrowserPage())
         if (request.url === '/v1/conversation') {
           if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
           const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
-          const snapshot = await embeddedBrowserView.webContents.executeJavaScript(script, true)
+          const snapshot = await executeEmbeddedBrowserScript(embeddedBrowserView.webContents, script)
           if (snapshot?.provider === 'chatgpt') {
             // Keep DOM text when available and enrich matching messages with
             // Chromium's stable backend DOM identities for continuity checks.
@@ -837,6 +866,7 @@ function startEmbeddedBrowserBridge() {
         }
         const payload = body ? JSON.parse(body) : {}
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return send(400, { error: 'Invalid action payload' })
+        requestAction = String(payload.action || '').slice(0, 40)
         if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
         if (payload.action === 'navigate') {
           const url = embeddedSafeUrl(payload.url)
@@ -855,7 +885,7 @@ function startEmbeddedBrowserBridge() {
           // composer contains text, prefer its explicit enabled Send button;
           // this confirms a submit action instead of assuming Enter sent it.
           if (key === 'Enter' && ['chatgpt.com', 'chat.openai.com'].includes(new URL(webContents.getURL()).hostname)) {
-            const submitted = await webContents.executeJavaScript(`(() => {
+            const submitted = await executeEmbeddedBrowserScript(webContents, `(() => {
               const visible = (element) => {
                 const rect = element.getBoundingClientRect()
                 const style = getComputedStyle(element)
@@ -870,7 +900,7 @@ function startEmbeddedBrowserBridge() {
               if (!send) return { submitted: false, reason: 'send_button_unavailable' }
               send.click()
               return { submitted: true, method: 'send_button' }
-            })()`, true)
+            })()`)
             if (submitted?.submitted) {
               return send(200, { ok: true, action: 'press_key', key, ...submitted })
             }
@@ -883,7 +913,7 @@ function startEmbeddedBrowserBridge() {
         }
         const args = { index: payload.index, text: payload.text }
         const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})(${JSON.stringify(payload.action)}, ${JSON.stringify(args)})`
-        const result = await webContents.executeJavaScript(script, true)
+        const result = await executeEmbeddedBrowserScript(webContents, script)
         if (payload.action === 'type') {
           const value = String(payload.text || '')
           if (value.length > 4000) return send(413, { error: 'Text is too long (maximum 4000 characters)' })
@@ -893,8 +923,23 @@ function startEmbeddedBrowserBridge() {
         return send(200, result)
       } catch (error) {
         const detail = String(error && error.message || 'Embedded browser action failed').slice(0, 500)
-        console.warn('[embedded-browser] bridge request failed', { path: request.url, error: detail })
-        send(409, { error: detail })
+        const currentContents = embeddedBrowserView && !embeddedBrowserView.webContents.isDestroyed()
+          ? embeddedBrowserView.webContents : null
+        const pageLoading = Boolean(currentContents && currentContents.isLoadingMainFrame())
+        const executionContextChanged = /script failed to execute|execution context.{0,30}(destroyed|not available)|context.{0,30}destroyed/i.test(detail)
+        const message = executionContextChanged
+          ? `The provider page execution context changed during ${requestAction || 'the browser action'}. Wait for the page to settle, take a fresh snapshot, then retry once.`
+          : detail
+        console.warn('[embedded-browser] bridge request failed', {
+          path: request.url, action: requestAction, error: detail, pageLoading,
+          pageHost: (() => { try { return new URL(currentContents?.getURL() || '').hostname } catch { return '' } })(),
+        })
+        send(409, {
+          error: message,
+          code: executionContextChanged ? 'browser_execution_context_changed' : 'embedded_browser_action_failed',
+          action: requestAction || undefined,
+          pageLoading,
+        })
       }
     })
     embeddedBrowserBridgeServer.once('error', reject)
