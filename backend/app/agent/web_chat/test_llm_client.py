@@ -438,7 +438,7 @@ async def test_web_chat_client_stops_consecutive_identical_conversation_reads_wi
             "arguments": {},
         }
         import json
-        return FENCE + "json\\n" + json.dumps(payload) + "\\n" + FENCE
+        return FENCE + "json\n" + json.dumps(payload) + "\n" + FENCE
 
     adapter = FakeAdapter([
         read_action("read-1"),
