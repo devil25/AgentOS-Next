@@ -107,7 +107,7 @@ test('ChatGPT response capture uses a bounded single-call accessibility fallback
   assert.match(capture, /chatgpt said/)
   assert.match(capture, /backendDOMNodeId \|\| node\.nodeId/)
   assert.match(capture, /stable across accessibility snapshots/)
-  assert.match(main, /snapshot\.captureSource = snapshot\.messages\.length \? 'accessibility_tree' : 'none'/)
+  assert.match(main, /snapshot\.captureSource = 'accessibility_tree'/)
   assert.match(main, /inspectEmbeddedAccessibilityMessages\(\)/)
   assert.match(main, /Prefer the legacy AgentOS evidence model for every read/)
   assert.match(main, /snapshot\.messages = accessibilityMessages/)
