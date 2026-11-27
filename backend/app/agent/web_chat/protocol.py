@@ -49,8 +49,8 @@ def normalize_provider_url(url: str) -> str:
     when the underlying DOM value is a plain URL. Only accept a link whose
     visible label exactly matches its HTTPS destination.
     """
-    value = str(url or "").strip().replace(r"\\]", "]").replace(r"\\)", ")")
-    match = re.fullmatch(r"\\[([^\\]]+)\\]\\((https://[^)\\s]+)\\)", value)
+    value = str(url or "").strip().replace(r"\]", "]").replace(r"\)", ")")
+    match = re.fullmatch(r"\[([^\]]+)\]\((https://[^)\s]+)\)", value)
     if match and match.group(1).strip() == match.group(2).strip():
         return match.group(2).strip()
     return value
