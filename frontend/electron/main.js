@@ -535,8 +535,11 @@ const EMBEDDED_PAGE_INSPECTION_SCRIPT = `(() => {
     const style = getComputedStyle(element)
     return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
   }
-  const text = String(document.body?.innerText || '').slice(0, 20000)
-  const headings = Array.from(document.querySelectorAll('h1,h2')).filter(visible).slice(0, 30).map((element) => element.innerText.trim()).filter(Boolean)
+  // Prefer the actual page main region so a chat response is not crowded out by
+  // account navigation, conversation history, and unrelated sidebars.
+  const contentRoot = document.querySelector('main,[role="main"]') || document.body
+  const text = String(contentRoot?.innerText || document.body?.innerText || '').slice(0, 20000)
+  const headings = Array.from(contentRoot.querySelectorAll('h1,h2')).filter(visible).slice(0, 30).map((element) => element.innerText.trim()).filter(Boolean)
   return { title: document.title, url: location.href, text, headings, inspectedAt: new Date().toISOString() }
 })()`
 let embeddedBrowserBridgeServer = null
@@ -641,7 +644,7 @@ async function inspectEmbeddedBrowserPage() {
 
 
 async function inspectEmbeddedAccessibilityMessages() {
-  if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) return []
+  if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) return { messages: [], nodeCount: 0 }
   const debuggerClient = embeddedBrowserView.webContents.debugger
   let attachedHere = false
   let commandTimer = null
@@ -650,80 +653,105 @@ async function inspectEmbeddedAccessibilityMessages() {
       debuggerClient.attach('1.3')
       attachedHere = true
     }
-    // Accessibility.getFullAXTree can stall on a large, continuously-rendering
-    // chat page. Keep this read strictly below the backend bridge's 12s limit.
+    // Read the complete page tree. Truncating the first 4,000 nodes can omit
+    // the active conversation after a large navigation/history sidebar.
     const tree = await Promise.race([
-      debuggerClient.sendCommand('Accessibility.getFullAXTree', { maxDepth: 20 }),
+      debuggerClient.sendCommand('Accessibility.getFullAXTree', { maxDepth: 30 }),
       new Promise((_, reject) => {
         commandTimer = setTimeout(() => reject(new Error('Accessibility snapshot exceeded its 3.5s budget')), 3500)
       }),
     ])
     if (commandTimer) clearTimeout(commandTimer)
     commandTimer = null
-    const rawNodes = Array.isArray(tree?.nodes) ? tree.nodes.slice(0, 4000) : []
+    const rawNodes = Array.isArray(tree?.nodes) ? tree.nodes : []
     const byId = new Map(rawNodes.map(node => [String(node.nodeId), node]))
     const textFor = (nodeId, depth = 0, seen = new Set()) => {
-      if (depth > 20 || seen.size >= 400 || seen.has(String(nodeId))) return ''
+      if (depth > 30 || seen.size >= 1500 || seen.has(String(nodeId))) return ''
       const key = String(nodeId)
       const node = byId.get(key)
       if (!node) return ''
       seen.add(key)
-      const own = String(node.name?.value ?? '').trim()
+      const own = String(node.name?.value ?? node.value?.value ?? '').trim()
       const role = String(node.role?.value || '').toLowerCase()
-      const ownText = ['statictext', 'paragraph', 'heading'].includes(role) ? own : ''
+      const ownText = ['statictext', 'paragraph', 'heading', 'listmarker'].includes(role) ? own : ''
       const children = Array.isArray(node.childIds) ? node.childIds : []
       const childText = children.map(child => textFor(child, depth + 1, seen)).filter(Boolean)
       return [ownText, ...childText].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 20000)
     }
     const descendants = (nodeId, depth = 0, seen = new Set()) => {
-      if (depth > 20 || seen.size >= 500 || seen.has(String(nodeId))) return []
+      if (depth > 30 || seen.size >= 2000 || seen.has(String(nodeId))) return []
       const key = String(nodeId)
       const node = byId.get(key)
       if (!node) return []
       seen.add(key)
       return [node, ...(Array.isArray(node.childIds) ? node.childIds.flatMap(child => descendants(child, depth + 1, seen)) : [])]
     }
+    const roleDescription = node => {
+      const property = (node?.properties || []).find(item => item?.name === 'roledescription')
+      return String(property?.value?.value || '')
+    }
+    const ancestorHint = node => {
+      const parts = []
+      let current = node
+      let depth = 0
+      while (current && depth < 8) {
+        parts.push(
+          String(current.name?.value || ''),
+          String(current.description?.value || ''),
+          roleDescription(current),
+        )
+        current = current.parentId ? byId.get(String(current.parentId)) : null
+        depth += 1
+      }
+      return parts.join(' ').toLowerCase()
+    }
     const messages = []
     for (const node of rawNodes) {
       const role = String(node?.role?.value || '').toLowerCase()
-      if (!['article', 'group', 'region'].includes(role)) continue
+      if (!['article', 'group', 'region', 'listitem'].includes(role)) continue
       const name = String(node?.name?.value || '').trim()
       const description = String(node?.description?.value || '').trim()
       const subtree = descendants(node.nodeId)
       const bodyText = textFor(node.nodeId)
+      if (!bodyText && !name) continue
       const controls = subtree
         .filter(child => String(child?.role?.value || '').toLowerCase() === 'button')
-        .map(child => String(child?.name?.value || '').toLowerCase())
-      const hint = [name, description, node?.value?.value || '', bodyText.slice(0, 600)].join(' ').toLowerCase()
-      const userPrefix = /(?:^|\\s)(?:you said|your message|user message|user):\\s*/i
-      const assistantPrefix = /(?:^|\\s)(?:chatgpt said|assistant response|assistant|chatgpt):\\s*/i
-      const hasAssistantControls = controls.some(label => /\\b(copy|read aloud|good response|bad response|regenerate|retry)\\b/i.test(label))
-      const hasUserControls = controls.some(label => /\\b(edit message|edit)\\b/i.test(label))
+        .map(child => String(child?.name?.value || child?.description?.value || '').toLowerCase())
+      const hint = [
+        name, description, node?.value?.value || '', roleDescription(node),
+        ancestorHint(node), bodyText.slice(0, 1200),
+      ].join(' ').toLowerCase()
+      const userPrefix = /(?:^|\\s)(?:you said|your message|user message|user|from you):?\\s*/i
+      const assistantPrefix = /(?:^|\\s)(?:chatgpt said|assistant response|assistant|chatgpt|from chatgpt):?\\s*/i
+      const hasAssistantControls = controls.some(label => /\\b(copy|read aloud|good response|bad response|regenerate|retry|share response)\\b/i.test(label))
+      const hasUserControls = controls.some(label => /\\b(edit message|edit your message)\\b/i.test(label))
       const messageRole = userPrefix.test(hint) || hasUserControls ? 'user'
         : assistantPrefix.test(hint) || hasAssistantControls ? 'assistant' : ''
       if (!messageRole) continue
-      const text = (bodyText || name).replace(/^(?:you said|your message|user message|user|chatgpt said|assistant response|assistant|chatgpt):\\s*/i, '').trim().slice(0, 20000)
+      const text = (bodyText || name)
+        .replace(/^(?:you said|your message|user message|user|from you|chatgpt said|assistant response|assistant|chatgpt|from chatgpt):?\\s*/i, '')
+        .trim().slice(0, 20000)
       if (!text) continue
-      // Chromium backendDOMNodeId remains stable across accessibility snapshots of the same document, matching the legacy AgentOS snapshot UID strategy.
+      // Use the same backend-DOM identity strategy as the legacy AgentOS
+      // accessibility snapshot; never identify a message by its current index.
       const identity = String(node.backendDOMNodeId || node.nodeId || '')
       if (!identity) continue
       messages.push({ message_id: identity, role: messageRole, text, complete: true })
       if (messages.length >= 100) break
     }
     const seenMessages = new Set()
-    return messages.filter(message => {
+    const uniqueMessages = messages.filter(message => {
       const key = message.role + ':' + message.text
       if (seenMessages.has(key)) return false
       seenMessages.add(key)
       return true
     })
+    return { messages: uniqueMessages, nodeCount: rawNodes.length }
   } catch (error) {
     console.warn('[embedded-browser] Accessibility snapshot unavailable:', String(error?.message || error).slice(0, 300))
-    return []
+    return { messages: [], nodeCount: 0 }
   } finally {
     if (commandTimer) clearTimeout(commandTimer)
-    // Detach only when this function attached the debugger. A timeout must not
-    // leave a debugger session that blocks subsequent reads.
     if (attachedHere && debuggerClient.isAttached()) {
       try { debuggerClient.detach() } catch {}
     }
@@ -758,16 +786,22 @@ function startEmbeddedBrowserBridge() {
           const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
           const snapshot = await embeddedBrowserView.webContents.executeJavaScript(script, true)
           if (snapshot?.provider === 'chatgpt') {
-            // Prefer the legacy AgentOS evidence model for every read, not only
-            // when CSS extraction fails. Stable backendDOMNodeIds let the
-            // adapter compare the same accessible nodes across successive
-            // snapshots even when the SPA changes its URL.
-            const accessibilityMessages = await inspectEmbeddedAccessibilityMessages()
-            if (accessibilityMessages.length) {
-              snapshot.messages = accessibilityMessages
+            // Prefer legacy AgentOS accessibility evidence on every read. The
+            // full tree is retained so long sidebars cannot hide the newest turn.
+            const accessibility = await inspectEmbeddedAccessibilityMessages()
+            snapshot.accessibilityNodeCount = accessibility.nodeCount
+            if (accessibility.messages.length) {
+              snapshot.messages = accessibility.messages
               snapshot.captureSource = 'accessibility_tree'
+            } else if (Array.isArray(snapshot.messages) && snapshot.messages.length) {
+              snapshot.captureSource = 'dom'
             } else {
-              snapshot.captureSource = Array.isArray(snapshot.messages) && snapshot.messages.length ? 'dom' : 'none'
+              // A bounded visible main-region fallback lets the agent read the
+              // actual answer when provider semantics change, instead of
+              // repeatedly polling an empty structured message list.
+              const pageEvidence = await inspectEmbeddedBrowserPage()
+              snapshot.pageText = String(pageEvidence?.text || '').slice(0, 12000)
+              snapshot.captureSource = snapshot.pageText ? 'visible_page_text_fallback' : 'none'
             }
           } else {
             snapshot.captureSource = 'dom'
