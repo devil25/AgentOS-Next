@@ -15,6 +15,7 @@ _PATTERNS = (
     re.compile(rf"\bonly\s+(?:use|call|invoke|execute)\s+(?:(?:the)\s+)?(?:tool\s+)?[`'\"“”]?({_TOOL_TOKEN})[`'\"“”]?", re.IGNORECASE),
 )
 _ARABIC_PATTERN = re.compile(rf"(?:استخدم|استعمل|نفّذ|نفذ)\s+(?:(?:الأداة|أداة)\s+)?[`'\"“”]?({_TOOL_TOKEN})[`'\"“”]?\s+فقط")
+_ARABIC_USING_PATTERN = re.compile(rf"باستخدام\s+(?:(?:الأداة|أداة)\s+)?[`\'\"“”]?({_TOOL_TOKEN})[`\'\"“”]?\s+فقط")
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ def filter_tool_calls(scope: ExplicitToolScope, calls: list[dict]) -> tuple[list
 def explicit_tool_scope(user_request: str) -> ExplicitToolScope | None:
     """Return a one-tool scope only when the user explicitly says that tool only."""
     text = str(user_request or "")
-    for pattern in (*_PATTERNS, _ARABIC_PATTERN):
+    for pattern in (*_PATTERNS, _ARABIC_PATTERN, _ARABIC_USING_PATTERN):
         match = pattern.search(text)
         if match:
             return ExplicitToolScope(match.group(1))
