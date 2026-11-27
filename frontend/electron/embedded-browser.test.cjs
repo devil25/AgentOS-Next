@@ -51,7 +51,21 @@ test('backend page-read bridge is loopback-only and bearer-authenticated', () =>
   assert.match(main, /embeddedBrowserBridgeServer\.listen\(0, '127\.0\.0\.1'/)
   assert.match(main, /request\.socket\.remoteAddress/)
   assert.match(main, /crypto'\)\.timingSafeEqual/)
-  assert.match(main, /request\.url !== '\/v1\/inspect'/)
+  assert.match(main, /\['\/v1\/inspect', '\/v1\/action'\]\.includes\(request\.url\)/)
   assert.match(main, /AGENTOS_EMBEDDED_BROWSER_SECRET: EMBEDDED_BROWSER_BRIDGE_SECRET/)
   assert.match(main, /await startEmbeddedBrowserBridge\(\)/)
+})
+
+test('embedded browser exposes only fixed interaction actions through its authenticated bridge', () => {
+  assert.match(main, /const EMBEDDED_BROWSER_INTERACTION_SCRIPT/)
+  for (const action of ['snapshot', 'click', 'type', 'press_key']) {
+    assert.match(main, new RegExp(`'${action}'`))
+  }
+  assert.match(main, /new Set\(\['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'\]\)/)
+  assert.match(main, /input:not\(\[type="password"\]\)/)
+  assert.match(main, /payload\.action === 'navigate'/)
+  assert.match(main, /embeddedSafeUrl\(payload\.url\)/)
+  assert.match(main, /payload\.text/)
+  assert.match(main, /value\.length > 4000/)
+  assert.doesNotMatch(main, /payload\.script|payload\.javascript|executeJavaScript\(payload/)
 })
