@@ -162,7 +162,7 @@ function spawnBackend() {
           : 'null',
         CORS_ALLOW_ORIGIN_REGEX: '',
         AGENT_RUNTIME_DIR: process.env.AGENT_RUNTIME_DIR || runtimeDir,
-        AGENT_WORKSPACE_DIR: process.env.AGENT_WORKSPACE_DIR || workspaceDir,
+        AGENT_WORKSPACE_DIR: process.env.AGENT_WORKSPACE_DIR || workspaceDir,\n        AGENTOS_EMBEDDED_BROWSER_PORT: String(embeddedBrowserBridgePort),\n        AGENTOS_EMBEDDED_BROWSER_SECRET: EMBEDDED_BROWSER_BRIDGE_SECRET,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -511,6 +511,73 @@ function closeEmbeddedBrowser() {
   try { mainWindow?.contentView.removeChildView(view) } catch {}
   try { if (!view.webContents.isDestroyed()) view.webContents.close({ waitForBeforeUnload: false }) } catch {}
   publishEmbeddedBrowserState()
+}
+
+
+const EMBEDDED_PAGE_INSPECTION_SCRIPT = `(() => {
+  const visible = (element) => {
+    const rect = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+  }
+  const text = String(document.body?.innerText || '').slice(0, 20000)
+  const headings = Array.from(document.querySelectorAll('h1,h2')).filter(visible).slice(0, 30).map((element) => element.innerText.trim()).filter(Boolean)
+  return { title: document.title, url: location.href, text, headings, inspectedAt: new Date().toISOString() }
+})()`
+let embeddedBrowserBridgeServer = null
+let embeddedBrowserBridgePort = 0
+const EMBEDDED_BROWSER_BRIDGE_SECRET = generateControlSecret()
+
+async function inspectEmbeddedBrowserPage() {
+  if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
+  const result = await embeddedBrowserView.webContents.executeJavaScript(EMBEDDED_PAGE_INSPECTION_SCRIPT, true)
+  return { ...result, url: embeddedSafeUrl(embeddedBrowserView.webContents.getURL()) }
+}
+
+function startEmbeddedBrowserBridge() {
+  return new Promise((resolve, reject) => {
+    embeddedBrowserBridgeServer = http.createServer(async (request, response) => {
+      const remote = request.socket.remoteAddress || ''
+      const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
+      const offered = String(request.headers.authorization || '')
+      const expected = `Bearer ${EMBEDDED_BROWSER_BRIDGE_SECRET}`
+      const offeredBuffer = Buffer.from(offered)
+      const expectedBuffer = Buffer.from(expected)
+      const authorized = offeredBuffer.length === expectedBuffer.length && require('crypto').timingSafeEqual(offeredBuffer, expectedBuffer)
+      const send = (status, payload) => {
+        response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+        response.end(JSON.stringify(payload))
+      }
+      if (!loopback || !authorized) return send(401, { error: 'Unauthorized' })
+      if (request.method !== 'POST' || request.url !== '/v1/inspect') return send(404, { error: 'Not found' })
+      let body = ''
+      for await (const chunk of request) {
+        body += chunk.toString('utf8')
+        if (body.length > 1024) return send(413, { error: 'Request too large' })
+      }
+      try {
+        const result = await inspectEmbeddedBrowserPage()
+        send(200, result)
+      } catch (error) {
+        send(409, { error: error.message || 'Embedded browser page is unavailable' })
+      }
+    })
+    embeddedBrowserBridgeServer.once('error', reject)
+    embeddedBrowserBridgeServer.listen(0, '127.0.0.1', () => {
+      const address = embeddedBrowserBridgeServer.address()
+      embeddedBrowserBridgePort = address && typeof address === 'object' ? address.port : 0
+      if (!embeddedBrowserBridgePort) return reject(new Error('Embedded browser bridge did not bind a port'))
+      console.log('[embedded-browser] Authenticated loopback bridge ready')
+      resolve()
+    })
+  })
+}
+
+function stopEmbeddedBrowserBridge() {
+  if (!embeddedBrowserBridgeServer) return
+  embeddedBrowserBridgeServer.close()
+  embeddedBrowserBridgeServer = null
+  embeddedBrowserBridgePort = 0
 }
 
 function attachEmbeddedBrowser(provider) {
@@ -959,17 +1026,7 @@ ipcMain.handle('embedded-browser:close', async (event) => {
 ipcMain.handle('embedded-browser:inspect', async (event) => {
   assertTrustedIpcSender(event)
   if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
-  const result = await embeddedBrowserView.webContents.executeJavaScript(`(() => {
-    const visible = (element) => {
-      const rect = element.getBoundingClientRect()
-      const style = getComputedStyle(element)
-      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
-    }
-    const text = String(document.body?.innerText || '').slice(0, 20000)
-    const headings = Array.from(document.querySelectorAll('h1,h2')).filter(visible).slice(0, 30).map((element) => element.innerText.trim()).filter(Boolean)
-    return { title: document.title, url: location.href, text, headings, inspectedAt: new Date().toISOString() }
-  })()`, true)
-  return { ...result, url: embeddedSafeUrl(embeddedBrowserView.webContents.getURL()) }
+  return inspectEmbeddedBrowserPage()
 })
 
 ipcMain.handle('storage:clear-app-cache', async (event) => {
