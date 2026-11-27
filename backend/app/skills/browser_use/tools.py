@@ -706,7 +706,7 @@ def _compact_embedded_conversation_messages(messages: list[Any]) -> tuple[list[d
         message_text = item["text"]
         was_truncated = len(message_text) > limit
         if was_truncated:
-            message_text = message_text[:limit] + "\\n[Message truncated by AgentOS to keep the tool result bounded.]"
+            message_text = message_text[:limit] + "\n[Message truncated by AgentOS to keep the tool result bounded.]"
             truncated = True
         safe_messages.append({
             "message_id": item["message_id"],
