@@ -81,6 +81,14 @@ test('embedded conversation endpoint returns provider-aware structured messages'
   assert.match(main, /executeJavaScript\(script, true\)/)
 })
 
+test('embedded ChatGPT conversation detection has safe fallbacks and precise generation state', () => {
+  assert.match(main, /article,\[data-testid\^="conversation-turn-"\]/)
+  assert.match(main, /node\.querySelector\('\[data-message-author-role\]/)
+  assert.match(main, /button\[data-testid\*="stop"\]/)
+  assert.match(main, /data-is-streaming/)
+  assert.doesNotMatch(main, /document\.querySelector\('\[aria-busy="true",\[data-testid\*="stop"/)
+})
+
 test('embedded browser text entry and Enter use native Electron input events', () => {
   const events = []
   const webContents = {
