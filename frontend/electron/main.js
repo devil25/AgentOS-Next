@@ -486,6 +486,7 @@ const EMBEDDED_PROVIDERS = Object.freeze({
 })
 let embeddedBrowserView = null
 let embeddedBrowserProvider = null
+let embeddedBrowserVisible = false
 
 function embeddedSafeUrl(value) {
   if (typeof value !== 'string' || value.length > 4096) throw new Error('Invalid browser URL')
@@ -501,9 +502,18 @@ function publishEmbeddedBrowserState(extra = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   const view = embeddedBrowserView
   const state = view && !view.webContents.isDestroyed()
-    ? { open: true, provider: embeddedBrowserProvider, url: view.webContents.getURL(), title: view.webContents.getTitle(), loading: view.webContents.isLoading(), canGoBack: view.webContents.navigationHistory.canGoBack(), canGoForward: view.webContents.navigationHistory.canGoForward(), ...extra }
+    ? { open: embeddedBrowserVisible, provider: embeddedBrowserProvider, url: view.webContents.getURL(), title: view.webContents.getTitle(), loading: view.webContents.isLoading(), canGoBack: view.webContents.navigationHistory.canGoBack(), canGoForward: view.webContents.navigationHistory.canGoForward(), ...extra }
     : { open: false, provider: null, url: '', title: '', loading: false, canGoBack: false, canGoForward: false, ...extra }
   mainWindow.webContents.send('embedded-browser:state', state)
+}
+
+function hideEmbeddedBrowser() {
+  if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) return
+  embeddedBrowserVisible = false
+  // Keep the persistent WebContents alive so its signed-in provider session
+  // remains available to AgentOS background conversation/tool transport.
+  embeddedBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+  publishEmbeddedBrowserState()
 }
 
 function closeEmbeddedBrowser() {
@@ -511,6 +521,7 @@ function closeEmbeddedBrowser() {
   const view = embeddedBrowserView
   embeddedBrowserView = null
   embeddedBrowserProvider = null
+  embeddedBrowserVisible = false
   try { mainWindow?.contentView.removeChildView(view) } catch {}
   try { if (!view.webContents.isDestroyed()) view.webContents.close({ waitForBeforeUnload: false }) } catch {}
   publishEmbeddedBrowserState()
@@ -692,6 +703,9 @@ function stopEmbeddedBrowserBridge() {
 function attachEmbeddedBrowser(provider) {
   if (!Object.hasOwn(EMBEDDED_PROVIDERS, provider)) throw new Error('Unsupported AI provider')
   if (embeddedBrowserView && embeddedBrowserProvider === provider && !embeddedBrowserView.webContents.isDestroyed()) {
+    embeddedBrowserVisible = true
+    const [width, height] = mainWindow.getContentSize()
+    embeddedBrowserView.setBounds({ x: 0, y: 96, width, height: Math.max(0, height - 96) })
     publishEmbeddedBrowserState()
     return true
   }
@@ -713,6 +727,7 @@ function attachEmbeddedBrowser(provider) {
   })
   embeddedBrowserView = view
   embeddedBrowserProvider = provider
+  embeddedBrowserVisible = true
   view.webContents.setWindowOpenHandler(({ url }) => {
     try { view.webContents.loadURL(embeddedSafeUrl(url)) } catch {}
     return { action: 'deny' }
@@ -1134,7 +1149,7 @@ ipcMain.handle('embedded-browser:bounds', async (event, bounds) => {
 
 ipcMain.handle('embedded-browser:close', async (event) => {
   assertTrustedIpcSender(event)
-  closeEmbeddedBrowser()
+  hideEmbeddedBrowser()
   return true
 })
 
