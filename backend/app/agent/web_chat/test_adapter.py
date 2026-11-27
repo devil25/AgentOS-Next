@@ -23,7 +23,7 @@ class FakeBrowser:
 
 
 def snapshot(messages=(), *, url="https://chatgpt.com/", generating=False,
-             composer=True, login=False, blocked=""):
+             composer=True, login=False, blocked="", context_limit=False):
     return ConversationSnapshot(
         url=url, title="ChatGPT", messages=tuple(messages),
         composer_ready=composer, generating=generating,
@@ -90,6 +90,17 @@ async def test_turn_stops_polling_when_provider_claims_generation_without_any_me
             tab_id=12, prompt="Do work", expected_provider="chatgpt",
         )
     assert browser.submitted == [(12, "Do work")]
+
+
+@pytest.mark.anyio
+async def test_turn_rolls_over_when_provider_exposes_an_explicit_context_limit_banner():
+    from app.agent.web_chat.adapter import WebChatContextLimitError
+
+    browser = FakeBrowser([snapshot([AssistantMessage("old", "Prior reply", True)], context_limit=True)])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+    with pytest.raises(WebChatContextLimitError, match="context limit"):
+        await adapter.send_and_wait(tab_id=12, prompt="Continue", expected_provider="chatgpt")
+    assert browser.submitted == []
 
 
 @pytest.mark.anyio
