@@ -661,28 +661,74 @@ async def embedded_browser_navigate(*, url: str) -> str:
         return _json_output({"ok": False, "error": str(exc)[:300]})
 
 
+def _compact_embedded_conversation_messages(messages: list[Any]) -> tuple[list[dict[str, Any]], int, bool]:
+    """Return the latest user/assistant exchange instead of the entire chat history."""
+    normalized: list[tuple[int, dict[str, Any]]] = []
+    for index, item in enumerate(messages):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        message_id = str(item.get("message_id") or "")[:300]
+        message_text = str(item.get("text") or "")
+        if role in {"user", "assistant"} and message_id and message_text.strip():
+            normalized.append((index, {
+                "message_id": message_id,
+                "role": role,
+                "text": message_text,
+                "complete": bool(item.get("complete", True)),
+            }))
+
+    total_count = len(normalized)
+    if not normalized:
+        return [], 0, False
+
+    latest_assistant = next(
+        (position for position in range(len(normalized) - 1, -1, -1)
+         if normalized[position][1]["role"] == "assistant"),
+        None,
+    )
+    if latest_assistant is not None:
+        latest_user = next(
+            (position for position in range(latest_assistant - 1, -1, -1)
+             if normalized[position][1]["role"] == "user"),
+            None,
+        )
+        selected_positions = ([latest_user] if latest_user is not None else []) + [latest_assistant]
+    else:
+        selected_positions = list(range(max(0, len(normalized) - 3), len(normalized)))
+
+    safe_messages: list[dict[str, Any]] = []
+    truncated = len(selected_positions) < total_count
+    for position in selected_positions:
+        original_index, item = normalized[position]
+        is_latest_assistant = position == latest_assistant
+        limit = 24000 if is_latest_assistant else 2000
+        message_text = item["text"]
+        was_truncated = len(message_text) > limit
+        if was_truncated:
+            message_text = message_text[:limit] + "\\n[Message truncated by AgentOS to keep the tool result bounded.]"
+            truncated = True
+        safe_messages.append({
+            "message_id": item["message_id"],
+            "role": item["role"],
+            "text": message_text,
+            "complete": item["complete"],
+        })
+    return safe_messages, total_count, truncated
+
+
 async def embedded_browser_conversation() -> str:
-    """Read structured provider messages and bounded visible-text evidence from the active chat."""
+    """Read only the latest user/assistant exchange from the active embedded chat."""
     try:
         payload = await _embedded_browser_request("/v1/conversation")
         messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
-        safe_messages = []
-        for item in messages[-100:]:
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role") or "")
-            message_id = str(item.get("message_id") or "")[:300]
-            message_text = str(item.get("text") or "")[:20000]
-            if role in {"user", "assistant"} and message_id and message_text:
-                safe_messages.append({
-                    "message_id": message_id,
-                    "role": role,
-                    "text": message_text,
-                    "complete": bool(item.get("complete", True)),
-                })
-        # Populated only when semantic message extraction could not identify
-        # messages; it is bounded visible main-region text, never credentials.
-        page_text = str(payload.get("pageText") or "")[:12000]
+        safe_messages, total_message_count, capture_truncated = _compact_embedded_conversation_messages(messages)
+        # The page-text fallback is useful only when semantic assistant extraction
+        # failed. Do not duplicate a long captured assistant answer in pageText.
+        has_assistant = any(item["role"] == "assistant" for item in safe_messages)
+        page_text = "" if has_assistant else str(payload.get("pageText") or "")[:8000]
+        if len(str(payload.get("pageText") or "")) > 8000:
+            capture_truncated = True
         return _json_output({
             "ok": True,
             "provider": str(payload.get("provider") or "")[:30],
@@ -690,6 +736,8 @@ async def embedded_browser_conversation() -> str:
             "url": str(payload.get("url") or "")[:4096],
             "messages": safe_messages,
             "messageCount": len(safe_messages),
+            "totalMessageCount": total_message_count,
+            "captureTruncated": capture_truncated,
             "captureSource": str(payload.get("captureSource") or "unknown")[:40],
             "accessibilityNodeCount": max(0, int(payload.get("accessibilityNodeCount") or 0)),
             "pageText": page_text,
