@@ -148,9 +148,10 @@ async def test_turn_allows_chatgpt_home_url_to_become_new_conversation_after_sub
 @pytest.mark.anyio
 async def test_turn_rejects_conversation_switch_after_submission():
     old = AssistantMessage("old", "Earlier response", True)
+    different = AssistantMessage("other-chat-message", "A different conversation", True)
     browser = FakeBrowser([
         snapshot([old], url="https://chatgpt.com/c/task-a"),
-        snapshot([old], url="https://chatgpt.com/c/task-b"),
+        snapshot([different], url="https://chatgpt.com/c/task-b"),
     ])
     adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
     with pytest.raises(WebChatAdapterError, match="conversation changed"):
@@ -213,9 +214,10 @@ async def test_turn_still_rejects_different_chatgpt_conversation_across_host_ali
 @pytest.mark.anyio
 async def test_initial_turn_rejects_switch_from_existing_conversation():
     old = AssistantMessage("old", "Earlier response", True)
+    different = AssistantMessage("other-chat-message", "A different conversation", True)
     browser = FakeBrowser([
         snapshot([old], url="https://chatgpt.com/c/task-a"),
-        snapshot([old], url="https://chatgpt.com/c/task-b"),
+        snapshot([different], url="https://chatgpt.com/c/task-b"),
     ])
     adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
     with pytest.raises(WebChatAdapterError, match="conversation changed"):
@@ -263,3 +265,20 @@ async def test_turn_accepts_an_automatically_resolved_page_id():
     )
     assert turn.tab_id == 23
     assert browser.submitted == [(23, "Use the detected tab")]
+
+
+@pytest.mark.anyio
+async def test_turn_allows_same_accessibility_history_when_provider_spa_url_changes():
+    old = AssistantMessage("stable-backend-node-101", "Earlier response", True)
+    new = AssistantMessage("stable-backend-node-202", "New response", True)
+    browser = FakeBrowser([
+        snapshot([old], url="https://chatgpt.com/c/task-a"),
+        snapshot([old, new], url="https://chatgpt.com/"),
+        snapshot([old, new], url="https://chatgpt.com/"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=2)
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Continue", expected_provider="chatgpt",
+        expected_conversation_url="https://chatgpt.com/c/task-a",
+    )
+    assert turn.assistant_message.message_id == "stable-backend-node-202"
