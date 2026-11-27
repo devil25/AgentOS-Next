@@ -86,6 +86,8 @@ test('embedded ChatGPT conversation detection has safe fallbacks and precise gen
   assert.match(main, /node\.querySelector\('\[data-message-author-role\]/)
   assert.match(main, /button\[data-testid\*="stop"\]/)
   assert.match(main, /data-is-streaming/)
+  assert.match(main, /const contextLimit = \/conversation is too long/)
+  assert.match(main, /contextLimit, blockedReason/)
   assert.doesNotMatch(main, /document\.querySelector\('\[aria-busy="true",\[data-testid\*="stop"/)
 })
 
