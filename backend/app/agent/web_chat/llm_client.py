@@ -14,6 +14,84 @@ from .adapter import WebChatSessionAdapter
 from .protocol import action_instruction, build_provider_turn, parse_web_chat_reply
 
 
+WEB_CHAT_TOOL_CATALOG_MAX_BYTES = 40_000
+_WEB_CHAT_TOOL_DESCRIPTION_MAX_CHARS = 480
+
+
+def _web_chat_tokens(value: str) -> set[str]:
+    import re
+
+    return {token for token in re.findall(r"[a-z0-9_]+|[\\u0600-\\u06ff]+", str(value or "").casefold()) if len(token) > 1}
+
+
+def _compact_json_schema(value: Any, *, depth: int = 0) -> Any:
+    """Keep validation-relevant JSON Schema fields while dropping verbose metadata."""
+    if depth > 8:
+        return {}
+    if isinstance(value, list):
+        return [_compact_json_schema(item, depth=depth + 1) for item in value[:80]]
+    if not isinstance(value, dict):
+        return value
+    allowed = {
+        "type", "properties", "required", "items", "enum", "const", "anyOf", "oneOf",
+        "allOf", "additionalProperties", "$ref", "$defs", "definitions", "minItems",
+        "maxItems", "minLength", "maxLength", "minimum", "maximum", "pattern",
+        "format", "nullable",
+    }
+    compact = {}
+    for key, item in value.items():
+        if key not in allowed:
+            continue
+        if key == "properties" and isinstance(item, dict):
+            compact[key] = {
+                str(name): _compact_json_schema(schema, depth=depth + 1)
+                for name, schema in list(item.items())[:100]
+            }
+        else:
+            compact[key] = _compact_json_schema(item, depth=depth + 1)
+    return compact
+
+
+def _select_web_chat_tool_catalog(tools: list[dict], goal: str) -> list[dict]:
+    """Build a task-relevant, size-bounded catalog without changing runtime permissions."""
+    goal_tokens = _web_chat_tokens(goal)
+    candidates = []
+    for index, tool in enumerate(tools):
+        if not isinstance(tool, dict) or not tool.get("name"):
+            continue
+        name = str(tool.get("name") or "")
+        description = str(tool.get("description") or "")
+        parameters = tool.get("parameters") or {"type": "object", "properties": {}}
+        property_names = " ".join((parameters.get("properties") or {}).keys()) if isinstance(parameters, dict) else ""
+        name_tokens = _web_chat_tokens(name.replace("_", " ").replace(".", " ").replace("-", " "))
+        description_tokens = _web_chat_tokens(description)
+        property_tokens = _web_chat_tokens(property_names)
+        score = 8 * len(goal_tokens & name_tokens) + 3 * len(goal_tokens & property_tokens) + len(goal_tokens & description_tokens)
+        entry = {
+            "name": name,
+            "description": description[:_WEB_CHAT_TOOL_DESCRIPTION_MAX_CHARS],
+            "parameters": _compact_json_schema(parameters),
+        }
+        candidates.append((score, index, entry))
+
+    # Preserve original order among equally relevant tools. A small baseline set
+    # keeps generic requests actionable; the rest are admitted only when relevant.
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    selected = []
+    used = 2  # JSON array brackets plus a small safety margin.
+    for score, _index, entry in candidates:
+        if score == 0 and len(selected) >= 8:
+            continue
+        encoded = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+        size = len(encoded.encode("utf-8")) + (1 if selected else 0)
+        if used + size > WEB_CHAT_TOOL_CATALOG_MAX_BYTES:
+            continue
+        selected.append(entry)
+        used += size
+    selected.sort(key=lambda entry: next((i for i, tool in enumerate(tools) if isinstance(tool, dict) and str(tool.get("name") or "") == entry["name"]), len(tools)))
+    return selected
+
+
 class WebChatLLMClient:
     def __init__(
         self,
@@ -106,17 +184,13 @@ class WebChatLLMClient:
                 goal = str((latest_user or {}).get("content") or "").strip()
                 if not goal:
                     raise RuntimeError("The web-chat provider did not receive a user task.")
-                catalog = [
-                    {
-                        "name": str(tool.get("name") or ""),
-                        "description": str(tool.get("description") or ""),
-                        "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
-                    }
-                    for tool in tools if tool.get("name")
-                ]
+                catalog = _select_web_chat_tool_catalog(tools, goal)
                 catalog_json = json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
-                if len(catalog_json) > 50_000:
-                    raise RuntimeError("The available AgentOS tool catalog is too large for the web-chat prompt.")
+                if len(catalog_json.encode("utf-8")) > WEB_CHAT_TOOL_CATALOG_MAX_BYTES:
+                    raise RuntimeError(
+                        "The relevant AgentOS tool schemas exceed the web-chat prompt budget; "
+                        "narrow the task or use the native AgentOS model provider."
+                    )
                 context_parts = []
                 if system_prompt:
                     context_parts.append("AgentOS runtime context (policy and task data):\n" + system_prompt[:8_000])
