@@ -663,7 +663,7 @@ async function inspectEmbeddedAccessibilityMessages() {
         const inspected = await debuggerClient.sendCommand('Runtime.callFunctionOn', {
           objectId,
           functionDeclaration: `function () {
-            const attrs = ['data-message-author-role','data-role','data-author','data-sender','data-testid','aria-label']
+            const attrs = ['data-message-author-role','data-role','data-author','data-sender','data-message-id','data-testid','aria-label']
             const attributes = Object.fromEntries(attrs.map(name => [name, this.getAttribute(name) || '']))
             const nested = this.querySelector('[data-message-author-role],[data-role],[data-author],[data-sender]')
             if (nested) {
