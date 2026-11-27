@@ -122,3 +122,25 @@ async def test_automatic_discovery_refuses_ambiguous_provider_tabs():
     with pytest.raises(WebChatAdapterError, match="More than one chatgpt tab"):
         await port.inspect(None)
     assert len(executor.calls) == 1
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("formatted_url", [
+    "[https://chatgpt.com/](https://chatgpt.com/)",
+    r"[https://chatgpt.com/\](https://chatgpt.com/\)",
+])
+async def test_inspect_normalizes_markdown_wrapped_provider_urls(formatted_url):
+    executor = FakeAuthorizedToolExecutor([{
+        "url": formatted_url,
+        "title": "ChatGPT",
+        "messages": [],
+        "composerReady": True,
+        "generating": False,
+        "loginRequired": False,
+        "blockedReason": "",
+    }])
+    port = ChromeWebChatBrowserPort(executor)
+    snapshot = await port.inspect(1)
+
+    assert snapshot.url == "https://chatgpt.com/"
+    assert executor.calls == [("mcp__chrome-devtools__inspect_web_chat", {"pageId": 1})]
+
