@@ -20,7 +20,7 @@ class ChatRequest(BaseModel):
     attachments: list["AttachmentRef"] = Field(default_factory=list)
     # Optional reasoning engine backed by the user's already-authenticated Chrome tab.
     web_chat_provider: Literal["chatgpt", "gemini", "deepseek", "zai"] | None = None
-    web_chat_page_id: int | None = Field(default=None, ge=0)
+    web_chat_page_id: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_web_chat_target(self):
