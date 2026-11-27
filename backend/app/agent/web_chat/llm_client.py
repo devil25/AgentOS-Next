@@ -169,6 +169,13 @@ class WebChatLLMClient:
                  if isinstance(item, dict) and item.get("web_chat_action_result") is True),
                 None,
             )
+            latest_user = next(
+                (item for item in reversed(messages)
+                 if isinstance(item, dict) and item.get("role") == "user" and not item.get("tool_result")),
+                None,
+            )
+            goal = str((latest_user or {}).get("content") or "").strip()
+            catalog = _select_web_chat_tool_catalog(tools, goal) if tools and goal else []
             if latest_result is not None:
                 result_text = str(latest_result.get("content") or "")
                 prompt = (
@@ -176,15 +183,8 @@ class WebChatLLMClient:
                     + result_text + "\n\n" + action_instruction()
                 )
             else:
-                latest_user = next(
-                    (item for item in reversed(messages)
-                     if isinstance(item, dict) and item.get("role") == "user" and not item.get("tool_result")),
-                    None,
-                )
-                goal = str((latest_user or {}).get("content") or "").strip()
                 if not goal:
                     raise RuntimeError("The web-chat provider did not receive a user task.")
-                catalog = _select_web_chat_tool_catalog(tools, goal)
                 catalog_json = json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
                 if len(catalog_json.encode("utf-8")) > WEB_CHAT_TOOL_CATALOG_MAX_BYTES:
                     raise RuntimeError(
@@ -221,7 +221,7 @@ class WebChatLLMClient:
                 )
             reply = parse_web_chat_reply(
                 turn.assistant_message.text,
-                allowed_actions=frozenset(str(tool.get("name") or "") for tool in tools if tool.get("name")),
+                allowed_actions=frozenset(str(tool.get("name") or "") for tool in catalog if tool.get("name")),
             )
             if reply.kind == "final":
                 if stream_callback is not None:
