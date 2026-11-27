@@ -117,3 +117,19 @@ test('embedded browser native text replacement uses the macOS command modifier',
     { type: 'keyUp', keyCode: 'A', modifiers: ['meta'] },
   ])
 })
+
+
+test('closing the login browser hides it without destroying the signed-in provider session', () => {
+  assert.match(main, /function hideEmbeddedBrowser\(\)/)
+  assert.match(main, /embeddedBrowserVisible = false/)
+  assert.match(main, /embeddedBrowserView\.setBounds\(\{ x: 0, y: 0, width: 0, height: 0 \}\)/)
+  assert.match(main, /embedded-browser:close'[\s\S]*?hideEmbeddedBrowser\(\)/)
+  assert.match(main, /persist:agentos-embedded-\$\{provider\}/)
+})
+
+test('sending a web-chat message does not open or foreground the embedded browser', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
+  const handleSend = app.slice(app.indexOf('const handleSend ='), app.indexOf('// A new chat gets its id'))
+  assert.match(handleSend, /setEmbeddedBrowserProvider\(webChatTarget\.provider\)/)
+  assert.doesNotMatch(handleSend, /setShowEmbeddedBrowser\(true\)|embedded\.open\(/)
+})
