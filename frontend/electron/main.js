@@ -558,13 +558,13 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     const selectors = provider === 'chatgpt'
       ? '[data-message-author-role]'
       : provider === 'gemini'
-        ? 'user-query, model-response, [data-message-id]'
+        ? 'user-query, model-response, [data-message-id], [data-testid*="message"]'
         : provider === 'deepseek'
-          ? '[data-message-id], [data-testid*="message"], .ds-message'
-          : '[data-message-id], [data-testid*="message"], [class*="message"]'
+          ? '[data-message-id], [data-testid*="message"], [data-role], .ds-message, [class*="message"]'
+          : '[data-message-id], [data-testid*="message"], [data-role], [data-author], [class*="message"]'
     const nodes = Array.from(document.querySelectorAll(selectors)).filter(visible).slice(-100)
     const messages = nodes.map((node, index) => {
-      const roleValue = String(node.getAttribute('data-message-author-role') || node.getAttribute('data-role') || node.getAttribute('role') || node.tagName || '').toLowerCase()
+      const roleValue = String(node.getAttribute('data-message-author-role') || node.getAttribute('data-role') || node.getAttribute('data-author') || node.getAttribute('data-sender') || node.getAttribute('data-testid') || node.getAttribute('aria-label') || node.getAttribute('role') || node.tagName || '').toLowerCase()
       const classes = String(node.className?.baseVal || node.className || '').toLowerCase()
       const role = /user|human|query/.test(roleValue + ' ' + classes) ? 'user'
         : /assistant|model|response/.test(roleValue + ' ' + classes) ? 'assistant' : ''
@@ -574,7 +574,6 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
       return { message_id: messageId.slice(0, 300), role, text, complete: true }
     }).filter(item => item.role && item.text)
     const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')).find(element => visible(element) && !element.disabled && !(element.tagName === 'INPUT' && element.type === 'password'))
-    const bodyText = String(document.body?.innerText || '').slice(0, 12000).toLowerCase()
     const loginRequired = Boolean(Array.from(document.querySelectorAll('input[type="password"]')).some(visible))
     const generating = Boolean(document.querySelector('[aria-busy="true"],[data-testid*="stop"],button[aria-label*="Stop"],button[aria-label*="stop"]'))
     return { title: document.title, url: location.href, provider, messages, composerReady: Boolean(composer), generating, loginRequired, blockedReason: '' }
