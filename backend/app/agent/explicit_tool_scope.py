@@ -6,12 +6,28 @@ from dataclasses import dataclass
 
 
 _TOOL_TOKEN = r"[A-Za-z][A-Za-z0-9_.:-]*"
+# Strip Markdown/quote delimiters before matching. Tool names are protocol
+# identifiers, so punctuation around them must not become part of the name.
+_DELIMITERS = re.compile(r"[\x60'\"“”‘’]")
 _PATTERNS = (
-    re.compile(rf"""\b(?:use|using|call|invoke|execute)\s+(?:(?:the|only)\s+)?(?:tool\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+only\b""", re.IGNORECASE),
-    re.compile(rf"""\bonly\s+(?:use|call|invoke|execute)\s+(?:(?:the)\s+)?(?:tool\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?""", re.IGNORECASE),
+    re.compile(
+        rf"\b(?:use|using|call|invoke|execute)\s+"
+        rf"(?:(?:the|only)\s+)?(?:tool\s+)?({_TOOL_TOKEN})\s+only\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\bonly\s+(?:use|call|invoke|execute)\s+"
+        rf"(?:(?:the)\s+)?(?:tool\s+)?({_TOOL_TOKEN})",
+        re.IGNORECASE,
+    ),
 )
-_ARABIC_PATTERN = re.compile(r"""(?:استخدم|استعمل|نفّذ|نفذ)\s+(?:(?:الأداة|أداة)\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+فقط""")
-_ARABIC_USING_PATTERN = re.compile(r"""باستخدام\s+(?:(?:الأداة|أداة)\s+)?[`'"]?({_TOOL_TOKEN})[`'"]?\s+فقط""")
+_ARABIC_PATTERN = re.compile(
+    rf"(?:استخدم|استعمل|نفّذ|نفذ)\s+(?:(?:الأداة|أداة)\s+)?"
+    rf"({_TOOL_TOKEN})\s+فقط"
+)
+_ARABIC_USING_PATTERN = re.compile(
+    rf"باستخدام\s+(?:(?:الأداة|أداة)\s+)?({_TOOL_TOKEN})\s+فقط"
+)
 
 
 @dataclass(frozen=True)
@@ -51,7 +67,7 @@ def filter_tool_calls(scope: ExplicitToolScope, calls: list[dict]) -> tuple[list
 
 
 def explicit_tool_scope(user_request: str) -> ExplicitToolScope | None:
-    text = str(user_request or "")
+    text = _DELIMITERS.sub("", str(user_request or ""))
     for pattern in (*_PATTERNS, _ARABIC_PATTERN, _ARABIC_USING_PATTERN):
         match = pattern.search(text)
         if match:
