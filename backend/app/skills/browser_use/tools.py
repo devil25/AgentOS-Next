@@ -686,6 +686,7 @@ async def embedded_browser_conversation() -> str:
             "title": str(payload.get("title") or "")[:300],
             "url": str(payload.get("url") or "")[:4096],
             "messages": safe_messages,
+            "captureSource": str(payload.get("captureSource") or "unknown")[:40],
             "composerReady": bool(payload.get("composerReady")),
             "generating": bool(payload.get("generating")),
             "loginRequired": bool(payload.get("loginRequired")),
