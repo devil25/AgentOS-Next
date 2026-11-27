@@ -217,13 +217,13 @@ class WebChatLLMClient:
                 handoff_parts = [
                     "The previous provider conversation reached its context limit. "
                     "This is a continuation of the SAME AgentOS task, not a new task.",
-                    "Original user goal:\\n" + goal[:30_000],
+                    "Original user goal:\n" + goal[:30_000],
                     "Continue from the verified task state below. Preserve completed outcomes. "
                     "Do not repeat or assume any previously executed action; request a new AgentOS "
                     "tool action only when the remaining work requires it.",
                 ]
                 if system_prompt:
-                    handoff_parts.append("AgentOS durable task state and runtime policy:\\n" + system_prompt[:8_000])
+                    handoff_parts.append("AgentOS durable task state and runtime policy:\n" + system_prompt[:8_000])
                 recorded_results = [
                     str(item.get("content") or "")[:5_000]
                     for item in messages
@@ -233,13 +233,13 @@ class WebChatLLMClient:
                     recorded_results = [str(latest_result.get("content") or "")[:5_000]]
                 if recorded_results:
                     handoff_parts.append(
-                        "Recorded AgentOS execution results (authoritative; most recent last):\\n"
-                        + "\\n\\n".join(recorded_results)
+                        "Recorded AgentOS execution results (authoritative; most recent last):\n"
+                        + "\n\n".join(recorded_results)
                     )
                 handoff = build_provider_turn(
                     "Continue the original task from the saved progress and recorded results. "
                     "Do not restart completed work.",
-                    context="\\n\\n".join(handoff_parts)[:60_000],
+                    context="\n\n".join(handoff_parts)[:60_000],
                 )
                 turn = await self.adapter.send_and_wait(
                     tab_id=self.tab_id, prompt=handoff, expected_provider=self.web_chat_provider,
