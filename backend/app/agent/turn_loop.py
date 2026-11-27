@@ -43,6 +43,7 @@ from app.agent.tool_cancellation import set_tool_scope, reset_tool_scope
 from app.agent.harness.workers import unfinished_workers
 from app.agent.tool_observations import attachment_image_payloads
 from app.agent.harness.tool_runner import ToolBatchRunner
+from app.agent.explicit_tool_scope import explicit_tool_scope
 from app.agent.harness.model_request import ModelRequestRunner, ModelRequestError
 from app.agent.harness.turn_transcript import TurnTranscript
 from app.agent.harness.tool_protocol import ToolCallResult
@@ -103,6 +104,61 @@ async def _model_request_or_pause(request, lifecycle):
     request_task.cancel()
     await asyncio.gather(request_task, return_exceptions=True)
     return None
+
+
+def _resolve_explicit_list_pages_call(user_message: str, tools: list[dict]) -> dict | None:
+    """Resolve an explicit, argument-free list_pages request without invoking a model.
+
+    This special case is deliberately narrow: asking a web-chat reasoning client
+    to use list_pages only must not first call inspect_web_chat to communicate
+    with that same web-chat tab.
+    """
+    scope = explicit_tool_scope(user_message)
+    if scope is None or scope.allowed_tool.lower() != "list_pages":
+        return None
+    matches: list[str] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("name") or "")
+        if not scope.allows(name) or not (
+            name == "list_pages" or name.endswith("__list_pages") or name.endswith("_list_pages")
+        ):
+            continue
+        parameters = tool.get("parameters")
+        parameters = parameters if isinstance(parameters, dict) else {}
+        required = parameters.get("required") or []
+        if isinstance(required, list) and not required:
+            matches.append(name)
+    if len(matches) != 1:
+        return None
+    return {
+        "call_id": "explicit-list-pages-" + uuid.uuid4().hex,
+        "name": matches[0],
+        "arguments": {},
+    }
+
+
+def _single_tool_result_text(output: str) -> str:
+    """Prefer the text content of an MCP result over its serialized envelope."""
+    raw = str(output or "")
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    content = payload.get("content")
+    if isinstance(content, list):
+        parts = [
+            str(item.get("text") or "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text")
+        ]
+        if parts:
+            return "\n".join(parts)
+    result = payload.get("result")
+    return str(result) if isinstance(result, str) else raw
 
 
 class TurnLoop:
@@ -572,8 +628,38 @@ class TurnLoop:
                     break
 
                 streamed_answer_text = ""
+                visible_tools = tool_runner.registry.get_all_tools(visible_only=True)
+                explicit_scope = explicit_tool_scope(message) if iteration_index == 0 else None
+                if explicit_scope is not None and explicit_scope.allowed_tool.lower() == "list_pages":
+                    direct_call = _resolve_explicit_list_pages_call(message, visible_tools)
+                    if direct_call is None:
+                        final_text = (
+                            "The explicitly requested list_pages tool is unavailable, ambiguous, "
+                            "or requires arguments. No other tool was invoked."
+                        )
+                        terminal_error = True
+                        incomplete_reason_code = "explicit_tool_scope_unavailable"
+                        break
+                    batch_outcome = await tool_runner.execute([direct_call])
+                    if batch_outcome.pause is not None:
+                        final_text = batch_outcome.pause.summary or "The requested list_pages action was blocked."
+                        incomplete_reason_code = batch_outcome.pause.reason_code or "explicit_tool_scope_enforced"
+                        terminal_error = batch_outcome.pause.status == "error"
+                        stop_requested = True
+                    elif tool_runner.history:
+                        direct_result = tool_runner.history[-1]
+                        final_text = _single_tool_result_text(str(direct_result.get("output") or ""))
+                        if direct_result.get("status") == "complete":
+                            completed_normally = True
+                        else:
+                            terminal_error = True
+                            incomplete_reason_code = "explicit_tool_scope_tool_failed"
+                    else:
+                        final_text = "The requested list_pages tool returned no result. No other tool was invoked."
+                        terminal_error = True
+                        incomplete_reason_code = "explicit_tool_scope_no_result"
+                    break
                 try:
-                    visible_tools = tool_runner.registry.get_all_tools(visible_only=True)
                     model_result = await _model_request_or_pause(model_runner.request(transcript.snapshot(
                         tools=visible_tools, system_prompt=_current_system_prompt(),
                         metadata={"iteration": iteration_index + 1, "consumed": budget.consumed},
