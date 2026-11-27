@@ -662,7 +662,7 @@ async def embedded_browser_navigate(*, url: str) -> str:
 
 
 async def embedded_browser_conversation() -> str:
-    """Read structured, bounded conversation state from the active embedded AI provider."""
+    """Read structured provider messages and bounded visible-text evidence from the active chat."""
     try:
         payload = await _embedded_browser_request("/v1/conversation")
         messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
@@ -680,13 +680,19 @@ async def embedded_browser_conversation() -> str:
                     "text": message_text,
                     "complete": bool(item.get("complete", True)),
                 })
+        # Populated only when semantic message extraction could not identify
+        # messages; it is bounded visible main-region text, never credentials.
+        page_text = str(payload.get("pageText") or "")[:12000]
         return _json_output({
             "ok": True,
             "provider": str(payload.get("provider") or "")[:30],
             "title": str(payload.get("title") or "")[:300],
             "url": str(payload.get("url") or "")[:4096],
             "messages": safe_messages,
+            "messageCount": len(safe_messages),
             "captureSource": str(payload.get("captureSource") or "unknown")[:40],
+            "accessibilityNodeCount": max(0, int(payload.get("accessibilityNodeCount") or 0)),
+            "pageText": page_text,
             "contextLimit": bool(payload.get("contextLimit")),
             "composerReady": bool(payload.get("composerReady")),
             "generating": bool(payload.get("generating")),
