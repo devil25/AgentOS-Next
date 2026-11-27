@@ -199,9 +199,10 @@ async def test_turn_allows_chatgpt_legacy_and_canonical_hosts_for_same_conversat
 @pytest.mark.anyio
 async def test_turn_still_rejects_different_chatgpt_conversation_across_host_aliases():
     old = AssistantMessage("old", "Earlier response", True)
+    different = AssistantMessage("new-document-node", "A different conversation", True)
     browser = FakeBrowser([
         snapshot([old], url="https://chat.openai.com/c/task-a"),
-        snapshot([old], url="https://chatgpt.com/c/task-b"),
+        snapshot([different], url="https://chatgpt.com/c/task-b"),
     ])
     adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
     with pytest.raises(WebChatAdapterError, match="conversation changed"):
