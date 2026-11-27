@@ -106,7 +106,7 @@ def register_browser_tools(registry, settings) -> None:
             },
             {
                 "name": "embedded_browser_conversation",
-                "description": "Read the active embedded AI conversation once after sending or when the user asks. Returns structured messages; if message extraction is unavailable, returns bounded visible text from the page main area. Do not repeatedly poll this read with unchanged page state: consume the returned messages or pageText. If no answer is visible, report the capture limitation instead of calling this tool in a loop.",
+                "description": "Read the active embedded AI conversation once after sending or when the user asks. Returns only the latest user/assistant exchange (not the full history), or bounded visible page text when semantic extraction is unavailable. Use the latest assistant text to answer the user immediately. Do not call this tool again unless a browser action changed the page.",
                 "parameters": {"type": "object", "properties": {}, "required": []},
                 "callable": lambda **_unused: embedded_browser_conversation(),
                 "domain": "browser", "execution_mode": "async", "timeout_seconds": 15.0,
