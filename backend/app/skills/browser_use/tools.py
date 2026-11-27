@@ -726,8 +726,8 @@ async def embedded_browser_conversation() -> str:
         # The page-text fallback is useful only when semantic assistant extraction
         # failed. Do not duplicate a long captured assistant answer in pageText.
         has_assistant = any(item["role"] == "assistant" for item in safe_messages)
-        page_text = "" if has_assistant else str(payload.get("pageText") or "")[:8000]
-        if len(str(payload.get("pageText") or "")) > 8000:
+        page_text = "" if has_assistant else str(payload.get("pageText") or "")[:6000]
+        if len(str(payload.get("pageText") or "")) > 6000:
             capture_truncated = True
         return _json_output({
             "ok": True,
