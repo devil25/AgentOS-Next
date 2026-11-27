@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
+
+from app.schemas import ChatRequest
 
 from app.agent.database import Database
 from app.agent.durable.journal import Journal
@@ -49,6 +52,11 @@ def test_web_chat_run_context_rejects_invalid_targets(tmp_path, provider, page_i
     db = _database(tmp_path)
     with pytest.raises(ValueError):
         save_web_chat_run_context("run-1", provider, page_id, db=db)
+
+
+def test_chat_request_rejects_zero_web_chat_page_id():
+    with pytest.raises(ValidationError):
+        ChatRequest(message="Use ChatGPT", web_chat_provider="chatgpt", web_chat_page_id=0)
 
 
 def test_web_chat_run_context_does_not_restore_for_unbound_run(tmp_path):
