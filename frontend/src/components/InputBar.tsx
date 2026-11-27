@@ -238,7 +238,7 @@ export function InputBar({
     && modelOptions.providers.find((connection) => connection.id === modelSelection.provider)?.available !== false
   const parsedWebChatPageId = Number(webChatPageId)
   const webChatTarget = webChatProvider && /^\d+$/.test(webChatPageId.trim())
-    && Number.isSafeInteger(parsedWebChatPageId) && parsedWebChatPageId >= 0
+    && Number.isSafeInteger(parsedWebChatPageId) && parsedWebChatPageId >= 1
     ? { provider: webChatProvider, pageId: parsedWebChatPageId }
     : undefined
   const reasoningEngineReady = webChatProvider ? Boolean(webChatTarget) : selectedModelAvailable
@@ -848,7 +848,7 @@ export function InputBar({
                   {webChatProvider ? (
                     <input
                       type="number"
-                      min={0}
+                      min={1}
                       step={1}
                       value={webChatPageId}
                       onChange={(event) => setWebChatPageId(event.target.value)}
@@ -857,7 +857,7 @@ export function InputBar({
                       disabled={isStreaming || settingsSaving}
                       title={isStreaming
                         ? "The Chrome page is fixed for the active task."
-                        : "Use the pageId returned by the AgentOS list_pages browser tool for your signed-in provider tab."}
+                        : "Use the positive pageId returned by the AgentOS list_pages browser tool for your signed-in provider tab."}
                       className="h-7 w-[76px] rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-[11px] text-neutral-200 outline-none focus:border-accent/50"
                     />
                   ) : (
