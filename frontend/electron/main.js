@@ -604,7 +604,9 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     const stopControl = Array.from(document.querySelectorAll('button[data-testid*="stop"],button[aria-label*="Stop" i],[data-testid*="stop"]')).some(element => visible(element) && !element.disabled)
     const streamingMessage = nodes.some(node => node.getAttribute('data-is-streaming') === 'true' || Boolean(node.querySelector('[data-is-streaming="true"]')))
     const generating = stopControl || streamingMessage
-    return { title: document.title, url: location.href, provider, messages, composerReady: Boolean(composer), generating, loginRequired, blockedReason: '' }
+    const contextText = String(document.body?.innerText || '').slice(0, 20000).toLowerCase()
+    const contextLimit = /conversation is too long|conversation has reached its limit|context length exceeded|maximum context length|context window is full|message is too long|too many tokens|this chat is too long to continue|you have reached the maximum length for this conversation|المحادثة طويلة جداً|تجاوزت المحادثة الحد|تجاوز حد السياق/.test(contextText)
+    return { title: document.title, url: location.href, provider, messages, composerReady: Boolean(composer), generating, loginRequired, contextLimit, blockedReason: '' }
   }
   if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
   const index = Number(args.index)
