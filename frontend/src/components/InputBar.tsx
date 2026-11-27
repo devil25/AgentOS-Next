@@ -854,7 +854,7 @@ export function InputBar({
                       value={webChatPageId}
                       onChange={(event) => setWebChatPageId(event.target.value)}
                       placeholder="Auto"
-                      aria-label="Chrome page ID (optional)"
+                      aria-label="Chrome page ID"
                       disabled={isStreaming || settingsSaving}
                       title={isStreaming
                         ? "The Chrome page is fixed for the active task."
