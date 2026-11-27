@@ -590,10 +590,10 @@ async def embedded_browser_read(*, max_chars: int = 20000) -> str:
     limit = max(500, min(int(max_chars or 20000), 20000))
     try:
         payload = await _embedded_browser_request("/v1/inspect")
-    except Exception as exc:
+    except Exception:
         return _json_output({
             "ok": False, "status": "error", "reason_code": "embedded_browser_read_failed",
-            "error": str(exc)[:500],
+            "error": "Could not read the active AgentOS embedded browser page.",
         })
     text_value = str(payload.get("text") or "")
     return _json_output({
