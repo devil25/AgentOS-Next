@@ -106,10 +106,10 @@ def register_browser_tools(registry, settings) -> None:
             },
             {
                 "name": "embedded_browser_conversation",
-                "description": "Read the active embedded AI conversation once after sending or when the user asks. Returns only the latest user/assistant exchange (not the full history), or bounded visible page text when semantic extraction is unavailable. Use the latest assistant text to answer the user immediately. Do not call this tool again unless a browser action changed the page.",
+                "description": "Read the active embedded AI conversation after sending or when the user asks. This tool waits briefly inside one call for the newest user message to receive a completed assistant reply, then returns only the latest user/assistant exchange (not the full history), or bounded visible page text when semantic extraction is unavailable. Use the latest assistant text to answer the user immediately. Do not call this tool again unless a browser action changed the page.",
                 "parameters": {"type": "object", "properties": {}, "required": []},
                 "callable": lambda **_unused: embedded_browser_conversation(),
-                "domain": "browser", "execution_mode": "async", "timeout_seconds": 15.0,
+                "domain": "browser", "execution_mode": "async", "timeout_seconds": 45.0,
                 "metadata": {"observation": True, "mutates_state": False, "risk_level": "low", "parallel_safe": False, "resource_locks": ["embedded_browser"], "repeat_safe": False},
             },
             {
