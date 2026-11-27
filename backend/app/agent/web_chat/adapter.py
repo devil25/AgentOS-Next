@@ -17,6 +17,26 @@ class WebChatAdapterError(RuntimeError):
     pass
 
 
+class WebChatContextLimitError(WebChatAdapterError):
+    """The provider explicitly requires a fresh conversation."""
+
+
+_CONTEXT_LIMIT_PATTERNS = (
+    "conversation is too long",
+    "conversation has reached its limit",
+    "context length exceeded",
+    "maximum context length",
+    "context window is full",
+    "message is too long",
+    "too many tokens",
+    "start a new chat",
+    "start a new conversation",
+    "المحادثة طويلة جداً",
+    "تجاوزت المحادثة الحد",
+    "تجاوز حد السياق",
+)
+
+
 @dataclass(frozen=True)
 class AssistantMessage:
     message_id: str
@@ -71,6 +91,19 @@ class WebChatSessionAdapter:
         self.stable_polls = max(1, stable_polls)
         self.empty_generation_grace = max(0.1, min(float(empty_generation_grace), 15.0))
         self.on_conversation_url = on_conversation_url
+
+    async def start_new_conversation(self) -> str:
+        """Start a provider conversation only through the authorized browser port."""
+        starter = getattr(self.browser, "start_new_conversation", None)
+        if not callable(starter):
+            raise WebChatAdapterError("This browser transport cannot safely start a new provider conversation.")
+        result = starter()
+        if hasattr(result, "__await__"):
+            result = await result
+        url = str(result or "")
+        if provider_for_url(url) is None:
+            raise WebChatAdapterError("The provider did not confirm a fresh conversation URL.")
+        return url
 
     @staticmethod
     def _conversation_identity(url: str) -> tuple[str, str]:
@@ -170,6 +203,11 @@ class WebChatSessionAdapter:
                 last_candidate = candidate
                 stable_count = 1
             if stable_count >= self.stable_polls:
+                lowered = candidate.text.casefold()
+                if any(marker in lowered for marker in _CONTEXT_LIMIT_PATTERNS):
+                    raise WebChatContextLimitError(
+                        "The provider explicitly reported that this conversation reached its context limit."
+                    )
                 return WebChatTurn(
                     provider=expected_provider,
                     tab_id=tab_id,
