@@ -147,15 +147,6 @@ class WebChatSessionAdapter:
         initial_identity = self._conversation_identity(before.url)
         if self.on_conversation_url is not None:
             self.on_conversation_url(before.url)
-        expected_identity = self._conversation_identity(expected_conversation_url) if expected_conversation_url else None
-        # A provider home URL ("/") is not a conversation identity. ChatGPT
-        # commonly creates /c/<id> only after the first prompt is submitted.
-        # Treat that one home-to-conversation transition as creation, then pin
-        # the concrete conversation path. Existing /c/<id> URLs remain strict.
-        pinned_identity = (
-            expected_identity if expected_identity and expected_identity[1] != "/" else
-            (initial_identity if initial_identity[1] != "/" else None)
-        )
         previous_ids = {item.message_id for item in before.messages if item.role == "assistant"}
         previous_id = next(reversed([item.message_id for item in before.messages if item.role == "assistant"]), "")
         await self.browser.submit(tab_id, prompt)
