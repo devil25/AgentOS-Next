@@ -424,6 +424,26 @@ async def restore_deleted_conversation(conv_id: str):
     return conversation
 
 
+@router.delete("/conversations/{conv_id}/permanent", response_model=OkResponse)
+async def permanently_delete_trashed_conversation(conv_id: str):
+    """Permanently remove a trashed chat only after its Run evidence is safe to discard."""
+    db = get_db()
+    conversation = db.get_conversation(conv_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not conversation.get("deleted_at"):
+        raise HTTPException(status_code=409, detail="Move the conversation to Trash before permanently deleting it.")
+    memory_manager = peek_memory_manager()
+    try:
+        found = memory_manager.delete(conv_id) if memory_manager is not None else delete_conversation_file(conv_id)
+    except ConversationHasUnresolvedRunError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not found:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    publish_ui_event("conversation.changed", {"conversation_id": conv_id, "action": "permanently_deleted"})
+    return {"ok": True}
+
+
 @router.delete("/conversations/{conv_id}")
 async def delete_conversation(conv_id: str):
     db = get_db()

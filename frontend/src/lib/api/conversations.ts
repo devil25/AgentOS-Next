@@ -56,6 +56,11 @@ export async function restoreConversation(id: string): Promise<Conversation> {
   return res.json()
 }
 
+export async function permanentlyDeleteConversation(id: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/api/conversations/${encodeURIComponent(id)}/permanent`, { method: 'DELETE' })
+  if (!res.ok) return throwApiError(res, 'Cannot permanently delete this conversation while its Run history is protected')
+}
+
 export async function renameConversation(id: string, title: string): Promise<Conversation> {
   const res = await apiFetch(`${BASE}/api/conversations/${encodeURIComponent(id)}`, {
     method: 'PATCH',

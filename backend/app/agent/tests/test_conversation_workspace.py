@@ -373,6 +373,14 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
     ))["status"] == "uncertain"
     assert db.fetchone("SELECT run_id FROM agent_runs WHERE run_id = ?", ("trash-run",))["run_id"] == "trash-run"
 
+    # Permanent deletion remains blocked while the external effect is uncertain.
+    permanent = client.delete("/api/conversations/trash-chat/permanent")
+    assert permanent.status_code == 409
+    assert db.get_conversation("trash-chat")["deleted_at"]
+    assert db.fetchone("SELECT status FROM run_operations WHERE operation_id = ?", (
+        "trash-uncertain-operation",
+    ))["status"] == "uncertain"
+
     # Direct Run creation paths (including scheduled work) must also respect Trash.
     with pytest.raises(InvalidTransitionError, match="trashed conversation"):
         journal.create_run(
@@ -403,3 +411,14 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
     # Restoring the chat never silently resolves its unknown external effect.
     with pytest.raises(database.ConversationHasUnresolvedRunError):
         db.delete_conversation("trash-chat")
+
+
+def test_permanent_delete_from_trash_succeeds_only_for_a_safe_conversation(db):
+    db.create_conversation("safe-trash-chat", "Safe trash chat", workspace_dir="C:/work")
+    assert db.soft_delete_conversation("safe-trash-chat") is True
+
+    response = TestClient(app).delete("/api/conversations/safe-trash-chat/permanent")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"ok": True}
+    assert db.get_conversation("safe-trash-chat") is None

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { RotateCcw, X } from 'lucide-react'
+import { RotateCcw, Trash2, X } from 'lucide-react'
 import {
-  fetchConversations, fetchDeletedConversations, restoreConversation,
+  fetchConversations, fetchDeletedConversations, permanentlyDeleteConversation, restoreConversation,
 } from '../lib/api/conversations'
 import type { Conversation } from '../lib/api/types'
 
@@ -25,6 +25,8 @@ export function ConversationHistoryDialog({ onClose, onSelect, onRefresh }: Prop
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(false)
   const [restoringId, setRestoringId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   /** Discard stale searches and append pages using the last activity cursor. */
@@ -71,6 +73,22 @@ export function ConversationHistoryDialog({ onClose, onSelect, onRefresh }: Prop
       setError(caught instanceof Error ? caught.message : 'Could not restore this conversation.')
     } finally {
       setRestoringId(null)
+    }
+  }
+
+  const permanentlyDelete = async (conversation: Conversation) => {
+    if (deletingId || restoringId) return
+    setDeletingId(conversation.id)
+    setError('')
+    try {
+      await permanentlyDeleteConversation(conversation.id)
+      setChats((current) => current.filter((chat) => chat.id !== conversation.id))
+      setConfirmingDeleteId(null)
+      onRefresh?.()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not permanently delete this conversation.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -150,16 +168,51 @@ export function ConversationHistoryDialog({ onClose, onSelect, onRefresh }: Prop
                     {chat.running ? ' · Run still active' : ''}
                   </span>
                 </span>
-                <button
-                  type="button"
-                  className="st-btn st-btn-ghost min-h-8 shrink-0 gap-1 px-2 text-xs"
-                  disabled={restoringId !== null}
-                  onClick={() => void restore(chat)}
-                  aria-label={`Restore ${chat.title}`}
-                >
-                  <RotateCcw size={13} />
-                  {restoringId === chat.id ? 'Restoring…' : 'Restore'}
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    className="st-btn st-btn-ghost min-h-8 gap-1 px-2 text-xs"
+                    disabled={restoringId !== null || deletingId !== null}
+                    onClick={() => void restore(chat)}
+                    aria-label={`Restore ${chat.title}`}
+                  >
+                    <RotateCcw size={13} />
+                    {restoringId === chat.id ? 'Restoring…' : 'Restore'}
+                  </button>
+                  {confirmingDeleteId === chat.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className="st-btn st-btn-ghost min-h-8 px-2 text-xs text-red-300"
+                        disabled={restoringId !== null || deletingId !== null}
+                        onClick={() => void permanentlyDelete(chat)}
+                        aria-label={`Confirm permanent delete ${chat.title}`}
+                      >
+                        {deletingId === chat.id ? 'Deleting…' : 'Confirm delete'}
+                      </button>
+                      <button
+                        type="button"
+                        className="st-btn st-btn-ghost min-h-8 px-2 text-xs"
+                        disabled={deletingId !== null}
+                        onClick={() => setConfirmingDeleteId(null)}
+                        aria-label={`Cancel permanent delete ${chat.title}`}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="st-btn st-btn-ghost st-btn-icon min-h-8"
+                      disabled={restoringId !== null || deletingId !== null}
+                      onClick={() => setConfirmingDeleteId(chat.id)}
+                      aria-label={`Delete permanently ${chat.title}`}
+                      title="Delete permanently"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               <button
