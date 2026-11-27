@@ -25,6 +25,22 @@ def _runtime(settings_data: AgentSettings):
     return build_runtime_namespace(base, settings_data)
 
 
+
+def test_browser_context_preserves_actionable_extension_connection_error():
+    from app.skills.mcp_bridge.registry import _browser_context
+
+    class Manager:
+        def call_tool_sync(self, _name, _arguments):
+            return json.dumps({
+                "ok": True,
+                "is_error": True,
+                "content": [{"type": "text", "text": "Chrome is open but the Monaw extension has not connected."}],
+            })
+
+    with pytest.raises(ValueError, match="Chrome is open but the Monaw extension has not connected"):
+        _browser_context(Manager(), "list_pages", {})
+
+
 def test_browser_server_ships_as_a_builtin_served_by_the_extension(monkeypatch):
     import sys
 
