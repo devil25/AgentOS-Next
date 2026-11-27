@@ -75,6 +75,24 @@ async def test_turn_does_not_return_partial_or_generating_response():
 
 
 @pytest.mark.anyio
+async def test_turn_stops_polling_when_provider_claims_generation_without_any_messages():
+    browser = FakeBrowser([
+        snapshot([], generating=True),
+        snapshot([], generating=True),
+        snapshot([], generating=True),
+        snapshot([], generating=True),
+    ])
+    adapter = WebChatSessionAdapter(
+        browser, poll_interval=0.1, timeout=5, empty_generation_grace=0.2,
+    )
+    with pytest.raises(WebChatAdapterError, match="no conversation messages"):
+        await adapter.send_and_wait(
+            tab_id=12, prompt="Do work", expected_provider="chatgpt",
+        )
+    assert browser.submitted == [(12, "Do work")]
+
+
+@pytest.mark.anyio
 async def test_turn_rejects_conversation_switch_after_submission():
     old = AssistantMessage("old", "Earlier response", True)
     browser = FakeBrowser([
