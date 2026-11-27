@@ -43,7 +43,7 @@ def test_browser_use_skill_registers_only_browser_fetch():
     registered = []
     register_tools(registered, SimpleNamespace(browser=SimpleNamespace(allowed_domains=["example.com"])))
 
-    assert [tool["name"] for tool in registered] == ["browser_fetch"]
+    assert [tool["name"] for tool in registered] == ["browser_fetch", "embedded_browser_read"]
     tool = registered[0]
     assert tool["metadata"]["observation"] is True
     assert tool["metadata"]["mutates_state"] is False
