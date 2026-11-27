@@ -24,8 +24,8 @@ class ChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_web_chat_target(self):
-        if (self.web_chat_provider is None) != (self.web_chat_page_id is None):
-            raise ValueError("web_chat_provider and web_chat_page_id must be supplied together")
+        if self.web_chat_page_id is not None and self.web_chat_provider is None:
+            raise ValueError("web_chat_provider is required when web_chat_page_id is supplied")
         return self
 
     @field_validator("conversation_id", "run_id")
