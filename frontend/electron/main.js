@@ -575,20 +575,35 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
         : provider === 'deepseek'
           ? '[data-message-id], [data-testid*="message"], [data-role], .ds-message, [class*="message"]'
           : '[data-message-id], [data-testid*="message"], [data-role], [data-author], [class*="message"]'
-    const nodes = Array.from(document.querySelectorAll(selectors)).filter(visible).slice(-100)
+    let nodes = Array.from(document.querySelectorAll(selectors)).filter(visible)
+    // ChatGPT may wrap each turn in an article/test-id container while the
+    // author-role marker is nested deeper in the rendered turn.
+    if (provider === 'chatgpt' && nodes.length === 0) {
+      nodes = Array.from(document.querySelectorAll('article,[data-testid^="conversation-turn-"],[data-testid*="conversation-turn"]')).filter(visible)
+    }
+    nodes = nodes.slice(-100)
     const messages = nodes.map((node, index) => {
-      const roleValue = String(node.getAttribute('data-message-author-role') || node.getAttribute('data-role') || node.getAttribute('data-author') || node.getAttribute('data-sender') || node.getAttribute('data-testid') || node.getAttribute('aria-label') || node.getAttribute('role') || node.tagName || '').toLowerCase()
-      const classes = String(node.className?.baseVal || node.className || '').toLowerCase()
+      const roleNode = node.matches('[data-message-author-role],[data-role],[data-author]')
+        ? node
+        : node.querySelector('[data-message-author-role],[data-role],[data-author],[data-sender]')
+      const source = roleNode || node
+      const roleValue = String(source.getAttribute('data-message-author-role') || source.getAttribute('data-role') || source.getAttribute('data-author') || source.getAttribute('data-sender') || source.getAttribute('data-testid') || source.getAttribute('aria-label') || source.getAttribute('role') || source.tagName || '').toLowerCase()
+      const classes = String(source.className?.baseVal || source.className || '').toLowerCase()
       const role = /user|human|query/.test(roleValue + ' ' + classes) ? 'user'
         : /assistant|model|response/.test(roleValue + ' ' + classes) ? 'assistant' : ''
-      const contentNode = node.querySelector('[data-message-content], .markdown, .message-content, .model-response-text') || node
+      const contentNode = source.querySelector('[data-message-content], .markdown, .message-content, .model-response-text') || source
       const text = String(contentNode.innerText || contentNode.textContent || '').trim().slice(0, 20000)
-      const messageId = String(node.getAttribute('data-message-id') || node.getAttribute('data-testid') || node.id || (role + '-' + index))
+      const messageId = String(source.getAttribute('data-message-id') || node.getAttribute('data-message-id') || source.getAttribute('data-testid') || node.getAttribute('data-testid') || node.id || (role + '-' + index))
       return { message_id: messageId.slice(0, 300), role, text, complete: true }
     }).filter(item => item.role && item.text)
     const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')).find(element => visible(element) && !element.disabled && !(element.tagName === 'INPUT' && element.type === 'password'))
     const loginRequired = Boolean(Array.from(document.querySelectorAll('input[type="password"]')).some(visible))
-    const generating = Boolean(document.querySelector('[aria-busy="true"],[data-testid*="stop"],button[aria-label*="Stop"],button[aria-label*="stop"]'))
+    // Do not treat a generic busy container as model generation: ChatGPT keeps
+    // aria-busy on unrelated UI regions. Only explicit stop controls or a
+    // streaming marker on an actual message count as generation.
+    const stopControl = Array.from(document.querySelectorAll('button[data-testid*="stop"],button[aria-label*="Stop" i],[data-testid*="stop"]')).some(element => visible(element) && !element.disabled)
+    const streamingMessage = nodes.some(node => node.getAttribute('data-is-streaming') === 'true' || Boolean(node.querySelector('[data-is-streaming="true"]')))
+    const generating = stopControl || streamingMessage
     return { title: document.title, url: location.href, provider, messages, composerReady: Boolean(composer), generating, loginRequired, blockedReason: '' }
   }
   if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
