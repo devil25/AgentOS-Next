@@ -149,9 +149,20 @@ def test_devtools_reads_never_prompt_and_are_observations(runtime_settings):
 
     for name in reads:
         assert json.loads(entries[name]["callable"]())["ok"] is True
-        assert entries[name]["metadata"] == {"observation": True, "mutates_state": False, "risk_level": "low"}
+        assert entries[name]["metadata"] == {
+            "observation": True, "mutates_state": False, "risk_level": "low", "durable_builtin": True,
+        }
         assert entries[name]["mcp_bridge"]["approval"]["action"] == "read"
+        from app.agent.durable.operation_policy import classify_tool
+        assert classify_tool(entries[name]["name"], trusted_builtin=True).effect_class == "read_only"
     assert [tool for tool, _ in calls] == reads
+
+    # The durable journal must keep real browser interactions opaque.
+    from app.agent.durable.operation_policy import classify_tool
+    interactions = _devtools_entries("click", "fill", "press_key")
+    for entry in interactions.values():
+        assert entry["metadata"]["durable_builtin"] is True
+        assert classify_tool(entry["name"], trusted_builtin=True).effect_class == "opaque_effect"
 
 
 def test_devtools_interactions_run_without_prompt_but_not_unattended(runtime_settings):
