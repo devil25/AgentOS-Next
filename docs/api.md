@@ -32,11 +32,11 @@ unauthenticated runtime endpoint.
 | `POST` | `/api/conversations` | `agent:run` | `ConversationOut` |
 | `POST` | `/api/conversations/workspace-validation` | `agent:run` | `ConversationWorkspace` |
 | `DELETE` | `/api/conversations/{conv_id}` | `agent:run` | `stream/file/none` |
-| `DELETE` | `/api/conversations/{conv_id}/permanent` | `agent:run` | `OkResponse` |
 | `PATCH` | `/api/conversations/{conv_id}` | `agent:run` | `ConversationOut` |
-| `POST` | `/api/conversations/{conv_id}/restore` | `agent:run` | `ConversationOut` |
 | `GET` | `/api/conversations/{conv_id}/context-usage` | `agent:run` | `ContextUsagePayload` |
 | `GET` | `/api/conversations/{conv_id}/messages` | `agent:run` | `MessagesResponse` |
+| `DELETE` | `/api/conversations/{conv_id}/permanent` | `agent:run` | `OkResponse` |
+| `POST` | `/api/conversations/{conv_id}/restore` | `agent:run` | `ConversationOut` |
 | `GET` | `/api/diagnostics/browser-use` | `diagnostics:read` | `BrowserUseDiagnosticsOut` |
 | `POST` | `/api/diagnostics/browser-use/extension/install` | `diagnostics:control` | `BrowserExtensionInstallOut` |
 | `POST` | `/api/diagnostics/browser-use/reset` | `diagnostics:control` | `BrowserUseDiagnosticsOut` |
