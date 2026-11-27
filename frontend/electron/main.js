@@ -551,7 +551,6 @@ function attachEmbeddedBrowser(provider) {
   mainWindow.contentView.addChildView(view)
   const [width, height] = mainWindow.getContentSize()
   view.setBounds({ x: 0, y: 96, width, height: Math.max(0, height - 96) })
-  view.setAutoResize({ width: true, height: true })
   view.webContents.loadURL(EMBEDDED_PROVIDERS[provider]).catch((error) => {
     console.error('[embedded-browser] Navigation failed:', error.message)
     publishEmbeddedBrowserState({ error: 'The selected website could not be loaded.' })
