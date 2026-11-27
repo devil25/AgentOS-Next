@@ -74,7 +74,7 @@ class WebChatSessionAdapter:
         return ((parsed.hostname or "").lower(), parsed.path.rstrip("/") or "/")
 
     async def send_and_wait(
-        self, *, tab_id: int, prompt: str, expected_provider: str,
+        self, *, tab_id: int | None, prompt: str, expected_provider: str,
         expected_conversation_url: str = "",
     ) -> WebChatTurn:
         if tab_id is not None and (not isinstance(tab_id, int) or isinstance(tab_id, bool) or tab_id < 1):
