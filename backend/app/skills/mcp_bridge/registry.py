@@ -574,6 +574,13 @@ def build_tool_entries(cfg: MCPServerConfig, manager, mcp_tools: list[Any]) -> l
                 return url_blocked
             return _call_mcp_tool(manager, _reflected_name, _tool_name, arguments, _schema_hash)
 
+        metadata = _tool_metadata(decision, annotations)
+        if cfg.name in BUILTIN_SERVER_SKILLS:
+            # The durable journal may apply the narrow trusted-builtin allowlist
+            # to known read-only tools. User-configured MCP servers never receive
+            # this capability merely from provider annotations or tool names.
+            metadata["durable_builtin"] = True
+
         entries.append(
             {
                 "name": reflected_name,
@@ -583,7 +590,7 @@ def build_tool_entries(cfg: MCPServerConfig, manager, mcp_tools: list[Any]) -> l
                 "domain": "general",
                 "execution_mode": "sync_thread_affine",
                 "affinity_group": f"mcp:{cfg.name}",
-                "metadata": _tool_metadata(decision, annotations),
+                "metadata": metadata,
                 "mcp_bridge": {
                     "server_name": cfg.name,
                     # Built-in servers count as part of the skill that ships them.
