@@ -786,19 +786,46 @@ function startEmbeddedBrowserBridge() {
           const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
           const snapshot = await embeddedBrowserView.webContents.executeJavaScript(script, true)
           if (snapshot?.provider === 'chatgpt') {
-            // Prefer legacy AgentOS accessibility evidence on every read. The
-            // full tree is retained so long sidebars cannot hide the newest turn.
+            // Keep DOM text when available and enrich matching messages with
+            // Chromium's stable backend DOM identities for continuity checks.
             const accessibility = await inspectEmbeddedAccessibilityMessages()
             snapshot.accessibilityNodeCount = accessibility.nodeCount
-            if (accessibility.messages.length) {
-              snapshot.messages = accessibility.messages
-              snapshot.captureSource = 'accessibility_tree'
-            } else if (Array.isArray(snapshot.messages) && snapshot.messages.length) {
-              snapshot.captureSource = 'dom'
+            const domMessages = Array.isArray(snapshot.messages) ? snapshot.messages : []
+            const messageKey = item => String(item?.role || '') + ':' +
+              String(item?.text || '').replace(/\\s+/g, ' ').trim()
+            const accessibleByText = new Map(
+              accessibility.messages.map(item => [messageKey(item), item])
+            )
+            const mergedMessages = domMessages.map(item => {
+              const accessible = accessibleByText.get(messageKey(item))
+              return accessible
+                ? { ...item, message_id: accessible.message_id, complete: accessible.complete }
+                : item
+            })
+            const mergedKeys = new Set(mergedMessages.map(messageKey))
+            const domHasAssistant = domMessages.some(item => item?.role === 'assistant' && String(item?.text || '').trim())
+            for (const item of accessibility.messages) {
+              const key = messageKey(item)
+              if (mergedKeys.has(key)) continue
+              // DOM is the rendered text source when it already contains an
+              // assistant reply; AX-only assistant duplicates are not appended.
+              if (domHasAssistant && item.role === 'assistant') continue
+              mergedMessages.push(item)
+              mergedKeys.add(key)
+            }
+            snapshot.messages = mergedMessages.slice(-100)
+            const hasAssistantMessage = snapshot.messages.some(
+              item => item?.role === 'assistant' && String(item?.text || '').trim()
+            )
+            const axHasAssistant = accessibility.messages.some(item => item.role === 'assistant')
+            if (hasAssistantMessage) {
+              snapshot.captureSource = domHasAssistant
+                ? (axHasAssistant ? 'dom+accessibility_tree' : 'dom')
+                : 'accessibility_tree'
             } else {
-              // A bounded visible main-region fallback lets the agent read the
-              // actual answer when provider semantics change, instead of
-              // repeatedly polling an empty structured message list.
+              // A user message alone is not proof of successful capture. Return
+              // visible content from the page main region while the assistant
+              // response is missing or the provider DOM semantics have changed.
               const pageEvidence = await inspectEmbeddedBrowserPage()
               snapshot.pageText = String(pageEvidence?.text || '').slice(0, 12000)
               snapshot.captureSource = snapshot.pageText ? 'visible_page_text_fallback' : 'none'
