@@ -124,6 +124,8 @@ async def test_embedded_port_submits_only_to_one_editable_composer():
                      "type": "textarea", "placeholder": "Message ChatGPT"},
                 ],
             })
+        if name == "embedded_browser_press_key":
+            return _tool_result({"ok": True, "action": name, "submissionVerified": True})
         return _tool_result({"ok": True, "action": name})
 
     port = EmbeddedWebChatBrowserPort("chatgpt", execute)
@@ -181,3 +183,35 @@ async def test_embedded_port_chunks_long_prompts_without_losing_order():
     assert "".join(item["text"] for item in typed) == prompt
     assert [item["append"] for item in typed] == [False, True, True]
     assert calls[-1] == ("embedded_browser_press_key", {"key": "Enter"})
+
+
+@pytest.mark.anyio
+async def test_embedded_port_stops_when_chatgpt_submission_is_not_confirmed():
+    calls = []
+
+    async def execute(name, arguments):
+        calls.append((name, arguments))
+        if name == "embedded_browser_snapshot":
+            return _tool_result({
+                "ok": True,
+                "elements": [{
+                    "index": 0, "tag": "textarea", "editable": True,
+                    "disabled": False, "type": "textarea", "placeholder": "Message ChatGPT",
+                }],
+            })
+        if name == "embedded_browser_press_key":
+            return _tool_result({
+                "ok": True, "action": name, "submitted": "unverified_native_enter",
+                "submissionVerified": False,
+            })
+        return _tool_result({"ok": True, "action": name})
+
+    port = EmbeddedWebChatBrowserPort("chatgpt", execute)
+    with pytest.raises(WebChatAdapterError, match="did not confirm"):
+        await port.submit(1, "A test prompt")
+
+    assert [name for name, _ in calls] == [
+        "embedded_browser_snapshot",
+        "embedded_browser_type",
+        "embedded_browser_press_key",
+    ]
