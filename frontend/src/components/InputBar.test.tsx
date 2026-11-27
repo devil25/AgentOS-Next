@@ -119,9 +119,10 @@ describe('InputBar model picker', () => {
     )
   })
 
-  it('requires a numeric Chrome page ID before enabling web-chat sending', () => {
+  it('allows automatic provider-tab discovery without a manual Chrome page ID', () => {
+    const onSend = vi.fn()
     render(<InputBar
-      onSend={vi.fn()}
+      onSend={onSend}
       onStop={vi.fn()}
       isStreaming={false}
       conversationId={null}
@@ -134,12 +135,10 @@ describe('InputBar model picker', () => {
     />)
     fireEvent.click(screen.getByRole('button', { name: 'Reasoning engine' }))
     fireEvent.click(screen.getByRole('option', { name: 'Gemini website' }))
-    const pageId = screen.getByRole('spinbutton', { name: 'Chrome page ID' })
-    fireEvent.change(pageId, { target: { value: '0' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Use Gemini' } })
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
-    fireEvent.change(pageId, { target: { value: 'abc' } })
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(onSend).toHaveBeenCalledWith('Use Gemini', [], { provider: 'gemini' })
   })
 
   it.each(['modelSelectionDisabled', 'approvalModeDisabled'] as const)('waits for %s settings to save before sending', (savingProp) => {
