@@ -292,7 +292,7 @@ async def test_embedded_browser_conversation_keeps_only_latest_exchange_and_boun
 
     assert [item["message_id"] for item in result["messages"]] == ["latest-user", "latest-assistant"]
     assert result["messages"][0]["text"] == "latest question"
-    assert len(result["messages"][1]["text"]) < 24500
+    assert len(result["messages"][1]["text"]) < 16500
     assert result["totalMessageCount"] == 4
     assert result["messageCount"] == 2
     assert result["captureTruncated"] is True
