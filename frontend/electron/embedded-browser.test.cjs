@@ -51,7 +51,7 @@ test('backend page-read bridge is loopback-only and bearer-authenticated', () =>
   assert.match(main, /embeddedBrowserBridgeServer\.listen\(0, '127\.0\.0\.1'/)
   assert.match(main, /request\.socket\.remoteAddress/)
   assert.match(main, /crypto'\)\.timingSafeEqual/)
-  assert.match(main, /\['\/v1\/inspect', '\/v1\/action'\]\.includes\(request\.url\)/)
+  assert.match(main, /\['\/v1\/inspect', '\/v1\/action', '\/v1\/conversation'\]\.includes\(request\.url\)/)
   assert.match(main, /AGENTOS_EMBEDDED_BROWSER_SECRET: EMBEDDED_BROWSER_BRIDGE_SECRET/)
   assert.match(main, /await startEmbeddedBrowserBridge\(\)/)
 })
