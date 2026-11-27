@@ -172,7 +172,7 @@ async def test_embedded_port_chunks_long_prompts_without_losing_order():
                      "type": "textarea", "placeholder": "Message ChatGPT"},
                 ],
             })
-        return _tool_result({"ok": True, "action": name})
+        return _tool_result({"ok": True, "action": name, "submissionVerified": name == "embedded_browser_press_key"})
 
     prompt = "أ" * 7501
     port = EmbeddedWebChatBrowserPort("chatgpt", execute)
