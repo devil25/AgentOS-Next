@@ -674,12 +674,14 @@ async function inspectEmbeddedAccessibilityMessages() {
       if (!['article', 'group', 'region'].includes(role)) continue
       const name = String(node?.name?.value || '').trim()
       const description = String(node?.description?.value || '').trim()
-      const hint = [name, description, node?.value?.value || ''].join(' ').toLowerCase()
-      const messageRole = /\b(user|human|you said|you:|your message)\b/.test(hint) ? 'user'
-        : /\b(assistant|chatgpt|model response|chatgpt said)\b/.test(hint) ? 'assistant' : ''
+      const bodyText = textFor(node.nodeId)
+      const hint = [name, description, node?.value?.value || '', bodyText.slice(0, 600)].join(' ').toLowerCase()
+      const userPrefix = /(?:^|\\s)(?:you said|your message|user message|user):\\s*/i
+      const assistantPrefix = /(?:^|\\s)(?:chatgpt said|assistant response|assistant|chatgpt):\\s*/i
+      const messageRole = userPrefix.test(hint) ? 'user'
+        : assistantPrefix.test(hint) ? 'assistant' : ''
       if (!messageRole) continue
-      const text = (name && !/^(user|assistant|chatgpt|you said|chatgpt said)$/i.test(name)
-        ? name : textFor(node.nodeId)).trim().slice(0, 20000)
+      const text = (bodyText || name).replace(/^(?:you said|your message|user message|user|chatgpt said|assistant response|assistant|chatgpt):\\s*/i, '').trim().slice(0, 20000)
       if (!text) continue
       const identity = String(node.nodeId || '')
       if (!identity) continue
