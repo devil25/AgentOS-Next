@@ -327,7 +327,7 @@ def test_paths_expand_environment_variables_before_resolving_workspace(tmp_path,
         workspace.reset_workspace_dir(token)
 
 
-def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(db):
+def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(db, monkeypatch):
     """Trash hides a protected conversation without deleting its durable recovery evidence."""
     db.create_conversation("trash-chat", "Protected chat", workspace_dir="C:/work")
     journal = Journal(db)
@@ -356,6 +356,9 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
             owner_instance_id="trash-owner",
             attempt=int(created["attempt"]),
         )
+
+    import app.api.routes.conversations as conversation_routes
+    monkeypatch.setattr(conversation_routes, "peek_memory_manager", lambda: None)
 
     client = TestClient(app)
     deleted = client.delete("/api/conversations/trash-chat")
@@ -413,7 +416,10 @@ def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(
         db.delete_conversation("trash-chat")
 
 
-def test_permanent_delete_from_trash_succeeds_only_for_a_safe_conversation(db):
+def test_permanent_delete_from_trash_succeeds_only_for_a_safe_conversation(db, monkeypatch):
+    import app.api.routes.conversations as conversation_routes
+    monkeypatch.setattr(conversation_routes, "peek_memory_manager", lambda: None)
+
     db.create_conversation("safe-trash-chat", "Safe trash chat", workspace_dir="C:/work")
     assert db.soft_delete_conversation("safe-trash-chat") is True
 
