@@ -127,7 +127,11 @@ class WebChatLLMClient:
                 tab_id=self.tab_id, prompt=prompt, expected_provider=self.web_chat_provider,
                 expected_conversation_url=self._conversation_url,
             )
-            self.tab_id = int(turn.tab_id)
+            resolved_tab_id = getattr(turn, "tab_id", None)
+            if resolved_tab_id is not None:
+                self.tab_id = int(resolved_tab_id)
+            elif self.tab_id is None:
+                raise RuntimeError("The web-chat adapter did not return the automatically resolved Chrome page ID.")
             returned_url = str(getattr(turn, "conversation_url", "") or "")
             if self._conversation_url and returned_url:
                 from .adapter import WebChatSessionAdapter
