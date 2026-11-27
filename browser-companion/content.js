@@ -25,7 +25,7 @@
 
   function roleOf(node) {
     const source = node.matches('[data-message-author-role],[data-role],[data-author]')
-      ? node : node.querySelector('[data-message-author-role],[data-role],[data-author],[data-sender]');
+      ? node : node.querySelector('[data-message-author-role],[data-role],[data-author],[data-sender]') || node;
     const hint = [
       source?.getAttribute('data-message-author-role'), source?.getAttribute('data-role'),
       source?.getAttribute('data-author'), source?.getAttribute('data-sender'),

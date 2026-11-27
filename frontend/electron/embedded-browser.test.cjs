@@ -300,3 +300,11 @@ test('companion service worker and provider observer are valid JavaScript', () =
   assert.match(worker, /\/v1\/companion\/event/)
   assert.doesNotMatch(worker + content, /chrome\.cookies|document\.cookie|input\[type=["']password["']\]\.value/)
 })
+
+
+test('companion role detection falls back to provider message elements such as Gemini user-query and model-response', () => {
+  const content = fs.readFileSync(path.join(__dirname, '../../browser-companion/content.js'), 'utf8')
+  assert.match(content, /node\.querySelector\('\[data-message-author-role\],\[data-role\],\[data-author\],\[data-sender\]'\) \|\| node/)
+  assert.match(content, /user-query/)
+  assert.match(content, /model-response/)
+})
