@@ -34,6 +34,20 @@ async def test_inspect_uses_fixed_read_only_browser_tool():
     assert executor.calls == [("mcp__chrome-devtools__inspect_web_chat", {"pageId": 7})]
 
 
+
+@pytest.mark.anyio
+async def test_inspect_rejects_wrong_provider_and_reports_safe_page_url():
+    executor = FakeAuthorizedToolExecutor([{
+        "url": "https://gemini.google.com/app",
+        "title": "Gemini",
+        "messages": [],
+        "composerReady": True,
+        "blockedReason": "",
+    }])
+    port = ChromeWebChatBrowserPort(executor, provider="chatgpt")
+    with pytest.raises(WebChatAdapterError, match=r"expected chatgpt, detected gemini.*https://gemini.google.com/app"):
+        await port.inspect(1)
+
 @pytest.mark.anyio
 async def test_submit_uses_snapshot_fill_and_enter_tools_without_page_script():
     executor = FakeAuthorizedToolExecutor([
@@ -72,7 +86,7 @@ async def test_inspect_rejects_unsupported_origin():
         "composerReady": True,
     }])
     port = ChromeWebChatBrowserPort(executor)
-    with pytest.raises(WebChatAdapterError, match="supported HTTPS provider"):
+    with pytest.raises(WebChatAdapterError, match=r"supported HTTPS provider.*https://example.com/"):
         await port.inspect(7)
 
 def test_fixed_web_chat_inspection_is_read_only_and_never_reads_credentials():
