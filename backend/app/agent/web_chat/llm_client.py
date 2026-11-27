@@ -187,7 +187,7 @@ class WebChatLLMClient:
                         "again unless a new browser action changed the page. If the capture contains no "
                         "assistant text or pageText, state that limitation clearly.\n\n"
                         "Original AgentOS request:\n" + goal[:6000] + "\n\n"
-                        "Bounded browser evidence:\n" + result_text[:30000]
+                        "Bounded browser evidence:\n" + result_text[:22000]
                     )
                 else:
                     prompt = (
