@@ -106,11 +106,11 @@ def register_browser_tools(registry, settings) -> None:
             },
             {
                 "name": "embedded_browser_conversation",
-                "description": "Read structured messages, composer readiness, login state, and generation state from the active embedded ChatGPT, Gemini, DeepSeek, or Z.ai conversation. Read-only observation.",
+                "description": "Read the active embedded AI conversation once after sending or when the user asks. Returns structured messages; if message extraction is unavailable, returns bounded visible text from the page main area. Do not repeatedly poll this read with unchanged page state: consume the returned messages or pageText. If no answer is visible, report the capture limitation instead of calling this tool in a loop.",
                 "parameters": {"type": "object", "properties": {}, "required": []},
                 "callable": lambda **_unused: embedded_browser_conversation(),
                 "domain": "browser", "execution_mode": "async", "timeout_seconds": 15.0,
-                "metadata": {"observation": True, "mutates_state": False, "risk_level": "low", "parallel_safe": False, "resource_locks": ["embedded_browser"], "repeat_safe": True},
+                "metadata": {"observation": True, "mutates_state": False, "risk_level": "low", "parallel_safe": False, "resource_locks": ["embedded_browser"], "repeat_safe": False},
             },
             {
                 "name": "embedded_browser_snapshot",
