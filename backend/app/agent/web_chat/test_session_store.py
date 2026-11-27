@@ -43,7 +43,7 @@ def test_web_chat_run_context_persists_only_provider_and_page_id(tmp_path):
 
 @pytest.mark.parametrize(
     ("provider", "page_id"),
-    [("unknown", 1), ("gemini", -1), ("zai", True)],
+    [("unknown", 1), ("gemini", -1), ("chatgpt", 0), ("zai", True)],
 )
 def test_web_chat_run_context_rejects_invalid_targets(tmp_path, provider, page_id):
     db = _database(tmp_path)
