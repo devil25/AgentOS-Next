@@ -197,10 +197,15 @@ def _page_id(arguments: dict[str, Any]) -> int | None:
     value = arguments.get("pageId")
     if value is None:
         return None
+    if isinstance(value, bool):
+        raise ToolError("pageId must be a positive integer from list_pages.")
     try:
-        return int(value)
-    except (TypeError, ValueError):
-        raise ToolError(f"pageId must be a number from list_pages, not {value!r}.") from None
+        page_id = int(value)
+        if page_id < 1 or float(value) != page_id:
+            raise ValueError
+        return page_id
+    except (TypeError, ValueError, OverflowError):
+        raise ToolError("pageId must be a positive integer from list_pages.") from None
 
 
 class BrowserTools:
