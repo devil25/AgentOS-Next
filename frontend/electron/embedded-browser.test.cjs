@@ -135,7 +135,9 @@ test('closing the login browser hides it without collapsing or destroying the si
   assert.match(main, /embeddedBrowserView\.setVisible\(false\)/)
   assert.match(main, /embedded-browser:close'[\s\S]*?hideEmbeddedBrowser\(\)/)
   assert.match(main, /persist:agentos-embedded-\$\{provider\}/)
-  assert.match(main, /Keep the persistent WebContents alive/)
+  const hide = main.slice(main.indexOf('function hideEmbeddedBrowser'), main.indexOf('function closeEmbeddedBrowser'))
+  assert.doesNotMatch(hide, /\.close\(|\.destroy\(|removeChildView/)
+  assert.match(hide, /embeddedBrowserView\.setVisible\(false\)/)
 })
 
 test('AgentOS starts a responsive hidden ChatGPT session at application startup', () => {
