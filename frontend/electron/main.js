@@ -550,6 +550,14 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     editable: element.isContentEditable || ['INPUT','TEXTAREA'].includes(element.tagName)
   })
   if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
+  if (action === 'press_key') {
+    const key = String(args.key || '')
+    if (!['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'].includes(key)) throw new Error('Unsupported key')
+    const target = document.activeElement || document.body
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true }))
+    return { ok: true, action, key }
+  }
   const index = Number(args.index)
   if (!Number.isInteger(index) || index < 0 || index >= elements.length) throw new Error('Element index is no longer available; take a fresh snapshot')
   const element = elements[index]
@@ -576,14 +584,6 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
     return { ok: true, action, index, characters: value.length }
-  }
-  if (action === 'press_key') {
-    const key = String(args.key || '')
-    if (!['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'].includes(key)) throw new Error('Unsupported key')
-    const target = document.activeElement || element
-    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
-    target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true }))
-    return { ok: true, action, key }
   }
   throw new Error('Unsupported embedded browser action')
 }`
