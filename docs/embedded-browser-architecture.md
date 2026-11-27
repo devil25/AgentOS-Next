@@ -2,7 +2,7 @@
 
 This branch introduces a native Electron `WebContentsView` inside AgentOS-Next.
 
-## First implementation slice
+## Integrated implementation
 
 - The AgentOS renderer owns the browser toolbar and provider selection.
 - Electron main owns the remote page in a separate `WebContentsView`.
@@ -12,17 +12,20 @@ This branch introduces a native Electron `WebContentsView` inside AgentOS-Next.
 - The initial read operation is a fixed, read-only DOM extraction that returns the page title, URL, visible text, and headings. It does not read cookies, local storage, session storage, passwords, or authorization headers.
 - The backend exposes this through the registered `embedded_browser_read` observation tool. The Electron-to-backend bridge is loopback-only and bearer-authenticated.
 - The AgentOS tool runner can also request a bounded interactive-element snapshot, click a snapshot index, fill a visible non-password text field, send a small allow-listed keyboard event, or navigate to an HTTPS URL. The Electron side implements fixed actions; it never accepts arbitrary JavaScript from the backend.
+- A provider-aware conversation observation returns bounded user/assistant message text, message IDs, composer readiness, login-required state, and generation state. It does not return browser storage or credentials.
+- When a web-chat provider is selected in the AgentOS composer, the matching embedded provider session is opened before the run starts. `WebChatLLMClient` now uses `EmbeddedWebChatBrowserPort` rather than the Chrome extension transport.
+- The embedded port dispatches conversation reads, snapshots, text entry, and Enter through the active `ToolBatchRunner.execute_transport_tool`, retaining tool registry validation, policy, approval, journaling, durable operation checks, and explicit tool-scope enforcement.
 
-## Current scope and next integration boundary
+## Current scope and remaining validation
 
-This slice establishes the in-app browser and routes page reading plus bounded interactions through registered AgentOS tools. It does **not yet** make the embedded conversation itself the active web-chat reasoning provider; that requires a provider-specific conversation adapter and end-to-end testing. The existing Chrome-extension path remains separate and unchanged.
-
-The next slice must route the existing web-chat adapter through the embedded view, with provider-specific message/composer extraction and completion detection. Every inspection and interaction must continue through the tool runner's policy, approval, journaling, and durable-run ownership checks. Do not add a second ungoverned execution path.
+The embedded conversation is now the selected web-chat reasoning provider when the user chooses ChatGPT, Gemini, DeepSeek, or Z.ai in the composer. The Chrome-extension browser path remains available separately for ordinary browser tools. The provider DOM extraction is intentionally conservative and needs live verification on each provider because their page structures can change. A provider whose composer or messages cannot be identified must fail closed without sending text.
 
 ## Validation requirements
 
 - Verify the Electron view lifecycle and renderer-measured bounds.
 - Verify persistent sessions per provider and secure navigation.
+- Verify provider message extraction, composer selection, and completed-response detection against live signed-in sessions for all four providers.
+- Verify one action cycle end-to-end: provider proposes one tool action, AgentOS executes it through the normal runner, and the real result is returned to the same provider conversation.
 - Verify page inspection is fixed/read-only and never exposes browser storage or secrets.
 - Run frontend typecheck/build and Electron tests.
 - Perform a packaged Windows smoke test before treating this as production-ready.
