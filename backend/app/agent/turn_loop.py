@@ -6,6 +6,7 @@ import asyncio
 import itertools
 import json
 import logging
+import re
 import uuid
 from collections import defaultdict
 from typing import AsyncIterator, Callable
