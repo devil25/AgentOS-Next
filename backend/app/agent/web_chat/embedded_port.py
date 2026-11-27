@@ -120,5 +120,12 @@ class EmbeddedWebChatBrowserPort:
         index = choices[0].get("index")
         if not isinstance(index, int) or isinstance(index, bool) or index < 0:
             raise WebChatAdapterError("The embedded provider composer index is invalid.")
-        await self._call("embedded_browser_type", {"index": index, "text": text})
+        # The bridge accepts bounded chunks so large provider prompts do not
+        # violate tool schemas or the loopback HTTP request-size limit.
+        chunk_size = 3000
+        chunks = [text[offset:offset + chunk_size] for offset in range(0, len(text), chunk_size)]
+        for chunk_index, chunk in enumerate(chunks):
+            await self._call("embedded_browser_type", {
+                "index": index, "text": chunk, "append": chunk_index > 0,
+            })
         await self._call("embedded_browser_press_key", {"key": "Enter"})
