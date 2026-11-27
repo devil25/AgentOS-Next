@@ -590,8 +590,11 @@ async def embedded_browser_read(*, max_chars: int = 20000) -> str:
     limit = max(500, min(int(max_chars or 20000), 20000))
     try:
         payload = await _embedded_browser_request("/v1/inspect")
-    except Exception:
-        return _json_output({"ok": False, "error": "Could not read the active AgentOS embedded browser page."})
+    except Exception as exc:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_read_failed",
+            "error": str(exc)[:500],
+        })
     text_value = str(payload.get("text") or "")
     return _json_output({
         "ok": True,
@@ -608,8 +611,11 @@ async def embedded_browser_snapshot() -> str:
     """List visible interactive elements in the active embedded page."""
     try:
         payload = await _embedded_browser_request("/v1/action", {"action": "snapshot"})
-    except Exception:
-        return _json_output({"ok": False, "error": "Could not inspect interactive elements in the embedded browser."})
+    except Exception as exc:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_snapshot_failed",
+            "error": str(exc)[:500],
+        })
     elements = payload.get("elements") if isinstance(payload.get("elements"), list) else []
     return _json_output({
         "ok": True,
@@ -625,7 +631,10 @@ async def embedded_browser_click(*, index: int) -> str:
         payload = await _embedded_browser_request("/v1/action", {"action": "click", "index": int(index)})
         return _json_output({"ok": True, **payload})
     except Exception as exc:
-        return _json_output({"ok": False, "error": str(exc)[:300]})
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_action_failed",
+            "error": str(exc)[:500],
+        })
 
 
 async def embedded_browser_type(*, index: int, text: str, append: bool = False) -> str:
@@ -637,7 +646,10 @@ async def embedded_browser_type(*, index: int, text: str, append: bool = False) 
         payload = await _embedded_browser_request("/v1/action", {"action": "type", "index": int(index), "text": value, "append": bool(append)})
         return _json_output({"ok": True, **payload})
     except Exception as exc:
-        return _json_output({"ok": False, "error": str(exc)[:300]})
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_type_failed",
+            "error": str(exc)[:500],
+        })
 
 
 async def embedded_browser_press_key(*, key: str) -> str:
@@ -649,7 +661,10 @@ async def embedded_browser_press_key(*, key: str) -> str:
         payload = await _embedded_browser_request("/v1/action", {"action": "press_key", "key": key})
         return _json_output({"ok": True, **payload})
     except Exception as exc:
-        return _json_output({"ok": False, "error": str(exc)[:300]})
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_key_failed",
+            "error": str(exc)[:500],
+        })
 
 
 async def embedded_browser_navigate(*, url: str) -> str:
@@ -658,7 +673,10 @@ async def embedded_browser_navigate(*, url: str) -> str:
         payload = await _embedded_browser_request("/v1/action", {"action": "navigate", "url": str(url or "")})
         return _json_output({"ok": True, **payload})
     except Exception as exc:
-        return _json_output({"ok": False, "error": str(exc)[:300]})
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_navigation_failed",
+            "error": str(exc)[:500],
+        })
 
 
 def _compact_embedded_conversation_messages(messages: list[Any]) -> tuple[list[dict[str, Any]], int, bool]:
@@ -748,4 +766,7 @@ async def embedded_browser_conversation() -> str:
             "blockedReason": str(payload.get("blockedReason") or "")[:300],
         })
     except Exception as exc:
-        return _json_output({"ok": False, "error": str(exc)[:300]})
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_conversation_failed",
+            "error": str(exc)[:500],
+        })
