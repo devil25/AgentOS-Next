@@ -65,7 +65,43 @@ function mcpCredential(input) {
     ...(input.action === 'replace' ? { value: safeString(input.value, 'MCP credential value') } : {}) }
 }
 
+
+const embeddedProviders = new Set(['chatgpt', 'gemini', 'deepseek', 'zai'])
+const embeddedProvider = (value) => {
+  if (typeof value !== 'string' || !embeddedProviders.has(value)) throw new TypeError('Unsupported embedded browser provider')
+  return value
+}
+const embeddedUrl = (value) => {
+  const safe = safeString(value, 'browser URL', 4096)
+  if (!/^https:\/\//i.test(safe)) throw new TypeError('The embedded browser only allows HTTPS URLs')
+  return safe
+}
+function onEmbeddedBrowserState(listener) {
+  if (typeof listener !== 'function') throw new TypeError('Invalid embedded browser listener')
+  const handler = (_event, state) => listener(state)
+  ipcRenderer.on('embedded-browser:state', handler)
+  return () => ipcRenderer.removeListener('embedded-browser:state', handler)
+}
+const embeddedBrowser = Object.freeze({
+  open: (provider) => ipcRenderer.invoke('embedded-browser:open', embeddedProvider(provider)),
+  navigate: (url) => ipcRenderer.invoke('embedded-browser:navigate', embeddedUrl(url)),
+  back: () => ipcRenderer.invoke('embedded-browser:back'),
+  forward: () => ipcRenderer.invoke('embedded-browser:forward'),
+  reload: () => ipcRenderer.invoke('embedded-browser:reload'),
+  setBounds: (bounds) => {
+    if (!bounds || typeof bounds !== 'object') throw new TypeError('Invalid browser viewport bounds')
+    for (const key of ['x', 'y', 'width', 'height']) {
+      if (!Number.isFinite(bounds[key])) throw new TypeError('Invalid browser viewport bounds')
+    }
+    return ipcRenderer.invoke('embedded-browser:bounds', bounds)
+  },
+  close: () => ipcRenderer.invoke('embedded-browser:close'),
+  inspect: () => ipcRenderer.invoke('embedded-browser:inspect'),
+  onState: onEmbeddedBrowserState,
+})
+
 const electronAPI = Object.freeze({
+  embeddedBrowser,
   updateStatus: () => ipcRenderer.invoke('updates:status'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),

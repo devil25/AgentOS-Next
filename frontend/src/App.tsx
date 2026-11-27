@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar'
 import { ChatWindow } from './components/ChatWindow'
 import { InputBar } from './components/InputBar'
 import { ApprovalToast } from './components/ApprovalToast'
+import { EmbeddedBrowserPanel } from './components/EmbeddedBrowserPanel'
 import { AccessGrantCard } from './components/AccessGrantCard'
 import { ExecutionTimeline } from './components/ExecutionTimeline'
 import { RecoveryPanel } from './components/RecoveryPanel'
@@ -105,6 +106,7 @@ export default function App() {
   const [savingWorkspace, setSavingWorkspace] = useState(false)
   const workspaceGenerationRef = useRef(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [showEmbeddedBrowser, setShowEmbeddedBrowser] = useState(false)
   const [settingsPage, setSettingsPage] = useState<SettingsPageId | undefined>(undefined)
   const [conversationsLoaded, setConversationsLoaded] = useState(false)
   const [guideDismissed, setGuideDismissed] = useState(readGuideDismissed)
@@ -680,7 +682,8 @@ export default function App() {
                   </details>
                 )
               })()}
-        />}
+          />}
+        onOpenBrowser={() => setShowEmbeddedBrowser(true)}
       />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
@@ -803,6 +806,8 @@ export default function App() {
           </main>
         </div>
       </div>
+
+      {showEmbeddedBrowser && <EmbeddedBrowserPanel onClose={() => setShowEmbeddedBrowser(false)} />}
 
       <ApprovalToast
         conversationId={activeConvId}

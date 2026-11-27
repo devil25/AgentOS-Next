@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Copy, Minus, PanelLeftClose, PanelLeftOpen, ShieldAlert, ShieldCheck, ShieldHalf, Square, X } from 'lucide-react'
+import { Copy, Globe, Minus, PanelLeftClose, PanelLeftOpen, ShieldAlert, ShieldCheck, ShieldHalf, Square, X } from 'lucide-react'
 import type { AgentSettings } from '../lib/api/types'
 import { resolveAgentName } from '../lib/identity'
 import appLogo from '../assets/agentos-mark.svg'
@@ -19,6 +19,7 @@ interface Props {
   status: AgentStatus
   approvalMode: ApprovalMode
   onOpenPermissions?: () => void
+  onOpenBrowser?: () => void
   actions?: ReactNode
 }
 
@@ -86,6 +87,7 @@ export function AppBar({
   status,
   approvalMode,
   onOpenPermissions,
+  onOpenBrowser,
   actions,
 }: Props) {
   const [editing, setEditing] = useState(false)
@@ -203,6 +205,13 @@ export function AppBar({
       </div>
 
       <div className="app-bar-actions">
+        {onOpenBrowser && (
+          <button type="button" onClick={onOpenBrowser}
+            className="no-drag inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-500/30 px-2 text-xs text-emerald-200 hover:bg-emerald-500/10"
+            aria-label="Open embedded browser" title="Open embedded browser">
+            <Globe size={14} /> Browser
+          </button>
+        )}
         {actions}
         <WindowControls />
       </div>

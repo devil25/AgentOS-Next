@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import os
 import re
 import ssl
 import urllib.error
@@ -544,3 +545,107 @@ def register_tools(registry, settings) -> None:
     from .registration import register_browser_tools
 
     register_browser_tools(registry, settings)
+
+
+async def _embedded_browser_request(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    port = os.environ.get("AGENTOS_EMBEDDED_BROWSER_PORT", "").strip()
+    secret = os.environ.get("AGENTOS_EMBEDDED_BROWSER_SECRET", "")
+    if not port.isdigit() or not secret:
+        raise RuntimeError("The AgentOS embedded browser bridge is not available.")
+
+    def _request() -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{int(port)}{path}",
+            data=json.dumps(payload or {}).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {secret}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=12) as response:
+            value = json.loads(response.read(512 * 1024).decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("Invalid embedded browser response")
+        if value.get("error"):
+            raise RuntimeError(str(value["error"])[:300])
+        return value
+
+    return await asyncio.to_thread(_request)
+
+
+async def embedded_browser_read(*, max_chars: int = 20000) -> str:
+    """Read visible text from the active AgentOS-Next embedded browser page."""
+    limit = max(500, min(int(max_chars or 20000), 20000))
+    try:
+        payload = await _embedded_browser_request("/v1/inspect")
+    except Exception:
+        return _json_output({"ok": False, "error": "Could not read the active AgentOS embedded browser page."})
+    text_value = str(payload.get("text") or "")
+    return _json_output({
+        "ok": True,
+        "title": str(payload.get("title") or "")[:300],
+        "url": str(payload.get("url") or "")[:4096],
+        "headings": [str(item)[:300] for item in (payload.get("headings") or [])[:30]],
+        "text": text_value[:limit],
+        "truncated": len(text_value) > limit,
+        "inspected_at": str(payload.get("inspectedAt") or ""),
+    })
+
+
+async def embedded_browser_snapshot() -> str:
+    """List visible interactive elements in the active embedded page."""
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "snapshot"})
+    except Exception:
+        return _json_output({"ok": False, "error": "Could not inspect interactive elements in the embedded browser."})
+    elements = payload.get("elements") if isinstance(payload.get("elements"), list) else []
+    return _json_output({
+        "ok": True,
+        "title": str(payload.get("title") or "")[:300],
+        "url": str(payload.get("url") or "")[:4096],
+        "elements": elements[:200],
+    })
+
+
+async def embedded_browser_click(*, index: int) -> str:
+    """Click one visible element identified by the latest embedded browser snapshot."""
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "click", "index": int(index)})
+        return _json_output({"ok": True, **payload})
+    except Exception as exc:
+        return _json_output({"ok": False, "error": str(exc)[:300]})
+
+
+async def embedded_browser_type(*, index: int, text: str) -> str:
+    """Replace text in a visible, non-password editable field."""
+    value = str(text or "")
+    if len(value) > 4000:
+        return _json_output({"ok": False, "error": "Text is too long (maximum 4000 characters)."})
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "type", "index": int(index), "text": value})
+        return _json_output({"ok": True, **payload})
+    except Exception as exc:
+        return _json_output({"ok": False, "error": str(exc)[:300]})
+
+
+async def embedded_browser_press_key(*, key: str) -> str:
+    """Press a small allow-listed key in the active embedded page."""
+    allowed = {"Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "Backspace"}
+    if key not in allowed:
+        return _json_output({"ok": False, "error": "Unsupported key."})
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "press_key", "key": key})
+        return _json_output({"ok": True, **payload})
+    except Exception as exc:
+        return _json_output({"ok": False, "error": str(exc)[:300]})
+
+
+async def embedded_browser_navigate(*, url: str) -> str:
+    """Navigate the active embedded browser to a user-supplied HTTPS URL."""
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "navigate", "url": str(url or "")})
+        return _json_output({"ok": True, **payload})
+    except Exception as exc:
+        return _json_output({"ok": False, "error": str(exc)[:300]})
