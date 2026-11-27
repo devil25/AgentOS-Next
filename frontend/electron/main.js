@@ -510,9 +510,10 @@ function publishEmbeddedBrowserState(extra = {}) {
 function hideEmbeddedBrowser() {
   if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) return
   embeddedBrowserVisible = false
-  // Keep the persistent WebContents alive so its signed-in provider session
-  // remains available to AgentOS background conversation/tool transport.
-  embeddedBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+  // Hide the native view without collapsing its viewport. A zero-sized
+  // viewport makes provider DOM elements appear non-visible to automation.
+  // Keep background throttling disabled so chat pages remain responsive.
+  embeddedBrowserView.setVisible(false)
   publishEmbeddedBrowserState()
 }
 
@@ -702,12 +703,15 @@ function stopEmbeddedBrowserBridge() {
   embeddedBrowserBridgePort = 0
 }
 
-function attachEmbeddedBrowser(provider) {
+function attachEmbeddedBrowser(provider, { visible = true } = {}) {
   if (!Object.hasOwn(EMBEDDED_PROVIDERS, provider)) throw new Error('Unsupported AI provider')
   if (embeddedBrowserView && embeddedBrowserProvider === provider && !embeddedBrowserView.webContents.isDestroyed()) {
-    embeddedBrowserVisible = true
-    const [width, height] = mainWindow.getContentSize()
-    embeddedBrowserView.setBounds({ x: 0, y: 96, width, height: Math.max(0, height - 96) })
+    embeddedBrowserVisible = visible
+    if (visible) {
+      const [width, height] = mainWindow.getContentSize()
+      embeddedBrowserView.setBounds({ x: 0, y: 96, width, height: Math.max(1, height - 96) })
+    }
+    embeddedBrowserView.setVisible(visible)
     publishEmbeddedBrowserState()
     return true
   }
@@ -729,7 +733,10 @@ function attachEmbeddedBrowser(provider) {
   })
   embeddedBrowserView = view
   embeddedBrowserProvider = provider
-  embeddedBrowserVisible = true
+  embeddedBrowserVisible = visible
+  // This page is also the reasoning transport surface. Keep it alive and
+  // responsive while hidden or while the AgentOS window is minimized.
+  view.webContents.setBackgroundThrottling(false)
   view.webContents.setWindowOpenHandler(({ url }) => {
     try { view.webContents.loadURL(embeddedSafeUrl(url)) } catch {}
     return { action: 'deny' }
@@ -743,7 +750,8 @@ function attachEmbeddedBrowser(provider) {
   })
   mainWindow.contentView.addChildView(view)
   const [width, height] = mainWindow.getContentSize()
-  view.setBounds({ x: 0, y: 96, width, height: Math.max(0, height - 96) })
+  view.setBounds({ x: 0, y: 96, width, height: Math.max(1, height - 96) })
+  view.setVisible(visible)
   view.webContents.loadURL(EMBEDDED_PROVIDERS[provider]).catch((error) => {
     console.error('[embedded-browser] Navigation failed:', error.message)
     publishEmbeddedBrowserState({ error: 'The selected website could not be loaded.' })
@@ -855,6 +863,14 @@ app.whenReady().then(async () => {
   }
   spawnBackend()
   createWindow()
+  // Start the default signed-in ChatGPT session with AgentOS. Keep its
+  // WebContentsView hidden from the UI but fully sized and active for tools.
+  try {
+    attachEmbeddedBrowser('chatgpt', { visible: false })
+    console.log('[embedded-browser] Background ChatGPT session initialized')
+  } catch (error) {
+    console.error('[embedded-browser] Background session initialization failed:', error.message)
+  }
 
   const updatesEnabled = app.isPackaged && process.platform === 'win32'
   const updater = updatesEnabled ? require('electron-updater').autoUpdater : null
