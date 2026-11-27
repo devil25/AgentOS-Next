@@ -549,6 +549,36 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     disabled: Boolean(element.disabled),
     editable: element.isContentEditable || ['INPUT','TEXTAREA'].includes(element.tagName)
   })
+  if (action === 'conversation') {
+    const provider = location.hostname === 'chatgpt.com' || location.hostname === 'chat.openai.com' ? 'chatgpt'
+      : location.hostname === 'gemini.google.com' ? 'gemini'
+      : location.hostname === 'chat.deepseek.com' ? 'deepseek'
+      : location.hostname === 'chat.z.ai' ? 'zai' : ''
+    if (!provider) throw new Error('The embedded page is not a supported AI chat provider')
+    const selectors = provider === 'chatgpt'
+      ? '[data-message-author-role]'
+      : provider === 'gemini'
+        ? 'user-query, model-response, [data-message-id]'
+        : provider === 'deepseek'
+          ? '[data-message-id], [data-testid*="message"], .ds-message'
+          : '[data-message-id], [data-testid*="message"], [class*="message"]'
+    const nodes = Array.from(document.querySelectorAll(selectors)).filter(visible).slice(-100)
+    const messages = nodes.map((node, index) => {
+      const roleValue = String(node.getAttribute('data-message-author-role') || node.getAttribute('data-role') || node.getAttribute('role') || node.tagName || '').toLowerCase()
+      const classes = String(node.className?.baseVal || node.className || '').toLowerCase()
+      const role = /user|human|query/.test(roleValue + ' ' + classes) ? 'user'
+        : /assistant|model|response/.test(roleValue + ' ' + classes) ? 'assistant' : ''
+      const contentNode = node.querySelector('[data-message-content], .markdown, .message-content, .model-response-text') || node
+      const text = String(contentNode.innerText || contentNode.textContent || '').trim().slice(0, 20000)
+      const messageId = String(node.getAttribute('data-message-id') || node.getAttribute('data-testid') || node.id || (role + '-' + index))
+      return { message_id: messageId.slice(0, 300), role, text, complete: true }
+    }).filter(item => item.role && item.text)
+    const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')).find(element => visible(element) && !element.disabled && !(element.tagName === 'INPUT' && element.type === 'password'))
+    const bodyText = String(document.body?.innerText || '').slice(0, 12000).toLowerCase()
+    const loginRequired = Boolean(Array.from(document.querySelectorAll('input[type="password"]')).some(visible))
+    const generating = Boolean(document.querySelector('[aria-busy="true"],[data-testid*="stop"],button[aria-label*="Stop"],button[aria-label*="stop"]'))
+    return { title: document.title, url: location.href, provider, messages, composerReady: Boolean(composer), generating, loginRequired, blockedReason: '' }
+  }
   if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
   if (action === 'press_key') {
     const key = String(args.key || '')
@@ -609,7 +639,7 @@ function startEmbeddedBrowserBridge() {
         response.end(JSON.stringify(payload))
       }
       if (!loopback || !authorized) return send(401, { error: 'Unauthorized' })
-      if (request.method !== 'POST' || !['/v1/inspect', '/v1/action'].includes(request.url)) return send(404, { error: 'Not found' })
+      if (request.method !== 'POST' || !['/v1/inspect', '/v1/action', '/v1/conversation'].includes(request.url)) return send(404, { error: 'Not found' })
       let body = ''
       for await (const chunk of request) {
         body += chunk.toString('utf8')
@@ -617,6 +647,11 @@ function startEmbeddedBrowserBridge() {
       }
       try {
         if (request.url === '/v1/inspect') return send(200, await inspectEmbeddedBrowserPage())
+        if (request.url === '/v1/conversation') {
+          if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
+          const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})('conversation', {})`
+          return send(200, await embeddedBrowserView.webContents.executeJavaScript(script, true))
+        }
         const payload = body ? JSON.parse(body) : {}
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return send(400, { error: 'Invalid action payload' })
         if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
