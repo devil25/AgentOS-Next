@@ -665,7 +665,7 @@ export default function App() {
         status={!isBackendReady ? 'starting' : isStreaming ? 'working' : 'ready'}
         approvalMode={approvalMode}
         onOpenPermissions={() => openSettings('permissions')}
-        actions={{activeConvId && <ChangesReview key={activeConvId} conversationId={activeConvId} runs={runController.runs} snapshot={runController.snapshot}
+        actions={activeConvId && <ChangesReview key={activeConvId} conversationId={activeConvId} runs={runController.runs} snapshot={runController.snapshot}
           legacyUndo={(() => {
                 const run = runController.snapshot
                 const lastMessage = messages[messages.length - 1]
@@ -682,7 +682,7 @@ export default function App() {
                   </details>
                 )
               })()}
-          />}}
+          />}
         onOpenBrowser={() => setShowEmbeddedBrowser(true)}
       />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
