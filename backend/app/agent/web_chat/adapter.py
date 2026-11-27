@@ -54,6 +54,7 @@ class ConversationSnapshot:
     generating: bool = False
     login_required: bool = False
     blocked_reason: str = ""
+    context_limit: bool = False
 
 
 class WebChatBrowserPort(Protocol):
@@ -133,6 +134,8 @@ class WebChatSessionAdapter:
             raise WebChatAdapterError("Sign in to the provider website in Chrome, then retry.")
         if before.blocked_reason:
             raise WebChatAdapterError(before.blocked_reason)
+        if before.context_limit:
+            raise WebChatContextLimitError("The provider explicitly reported that this conversation reached its context limit.")
         if not before.composer_ready:
             raise WebChatAdapterError("The provider message composer is not ready.")
         initial_identity = self._conversation_identity(before.url)
@@ -173,6 +176,8 @@ class WebChatSessionAdapter:
                 raise WebChatAdapterError("The provider session expired. Sign in again in Chrome.")
             if current.blocked_reason:
                 raise WebChatAdapterError(current.blocked_reason)
+            if current.context_limit:
+                raise WebChatContextLimitError("The provider explicitly reported that this conversation reached its context limit.")
             now = asyncio.get_running_loop().time()
             if current.generating and not current.messages:
                 if empty_generation_since is None:
