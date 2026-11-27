@@ -108,8 +108,12 @@ test('ChatGPT response capture uses the complete legacy-style accessibility tree
   assert.match(capture, /roleDescription/)
   assert.match(capture, /backendDOMNodeId \|\| node\.nodeId/)
   assert.doesNotMatch(capture, /DOM\.resolveNode|Runtime\.callFunctionOn/)
-  assert.match(main, /snapshot\.captureSource = 'accessibility_tree'/)
-  assert.match(main, /snapshot\.messages = accessibility\.messages/)
+  assert.match(main, /snapshot\.captureSource = domHasAssistant/)
+  assert.match(main, /snapshot\.messages = mergedMessages/)
+  assert.match(main, /const messageKey/)
+  assert.match(main, /hasAssistantMessage/)
+  assert.match(main, /dom\\+accessibility_tree/)
+
 })
 
 test('ChatGPT Enter submits through the enabled Send button when available', () => {
