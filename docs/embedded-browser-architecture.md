@@ -29,3 +29,20 @@ The embedded conversation is now the selected web-chat reasoning provider when t
 - Verify page inspection is fixed/read-only and never exposes browser storage or secrets.
 - Run frontend typecheck/build and Electron tests.
 - Perform a packaged Windows smoke test before treating this as production-ready.
+
+
+## Login-once, in-app conversation workflow
+
+The embedded provider browser is a sign-in and session-management surface, not the normal chat UI.
+Users open it explicitly from the AgentOS app, choose a provider, and sign in. Closing the panel
+hides the provider WebContentsView without destroying it, so the authenticated persistent Electron
+session remains available to the loopback-only, bearer-authenticated backend bridge. Sending a
+message from AgentOS never opens or foregrounds the browser; the selected provider is sent to the
+backend conversation run, which reads and submits through the already attached provider session.
+Reopening the browser panel for the same provider reuses the existing WebContentsView and does not
+navigate away from the signed-in conversation. Switching providers creates/attaches the selected
+provider's separate persistent session.
+
+This workflow does not export cookies, passwords, local storage, or provider tokens. If the
+provider session is unavailable or signed out, the AgentOS run must report that state and the user
+can explicitly reopen the browser panel to sign in again.
