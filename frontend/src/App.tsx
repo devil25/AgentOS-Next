@@ -107,6 +107,7 @@ export default function App() {
   const workspaceGenerationRef = useRef(0)
   const [showSettings, setShowSettings] = useState(false)
   const [showEmbeddedBrowser, setShowEmbeddedBrowser] = useState(false)
+  const [embeddedBrowserProvider, setEmbeddedBrowserProvider] = useState<'chatgpt' | 'gemini' | 'deepseek' | 'zai'>('chatgpt')
   const [settingsPage, setSettingsPage] = useState<SettingsPageId | undefined>(undefined)
   const [conversationsLoaded, setConversationsLoaded] = useState(false)
   const [guideDismissed, setGuideDismissed] = useState(readGuideDismissed)
@@ -508,8 +509,22 @@ export default function App() {
     }
   }
 
-  const handleSend = (text: string, attachments: UploadedAttachment[] = [], webChatTarget?: WebChatTarget) => {
+  const handleSend = async (text: string, attachments: UploadedAttachment[] = [], webChatTarget?: WebChatTarget) => {
     if (savingWorkspace) return
+    if (webChatTarget) {
+      setEmbeddedBrowserProvider(webChatTarget.provider)
+      setShowEmbeddedBrowser(true)
+      const embedded = window.electronAPI?.embeddedBrowser
+      if (!embedded) return
+      try {
+        // Ensure the selected provider's persistent embedded session is attached
+        // before the backend begins inspecting or submitting to the conversation.
+        await embedded.open(webChatTarget.provider)
+      } catch {
+        // The browser panel reports its own navigation/attachment error.
+        return
+      }
+    }
     const generation = workspaceGenerationRef.current
     const onConversationCreated = (newConvId: string) => {
       if (generation !== workspaceGenerationRef.current) return
@@ -807,7 +822,7 @@ export default function App() {
         </div>
       </div>
 
-      {showEmbeddedBrowser && <EmbeddedBrowserPanel onClose={() => setShowEmbeddedBrowser(false)} />}
+      {showEmbeddedBrowser && <EmbeddedBrowserPanel initialProvider={embeddedBrowserProvider} onClose={() => setShowEmbeddedBrowser(false)} />}
 
       <ApprovalToast
         conversationId={activeConvId}
