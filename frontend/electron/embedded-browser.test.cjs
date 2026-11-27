@@ -5,6 +5,7 @@ const test = require('node:test')
 
 const main = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8')
 const preload = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8')
+const { sendNativeKey, replaceFocusedText } = require('./embedded-browser-input.cjs')
 
 test('embedded browser uses isolated persistent provider sessions', () => {
   assert.match(main, /new WebContentsView\(/)
@@ -78,4 +79,41 @@ test('embedded conversation endpoint returns provider-aware structured messages'
   assert.match(main, /generating/)
   assert.match(main, /request\.url === '\/v1\/conversation'/)
   assert.match(main, /executeJavaScript\(script, true\)/)
+})
+
+test('embedded browser text entry and Enter use native Electron input events', () => {
+  const events = []
+  const webContents = {
+    sendInputEvent: (event) => events.push({ kind: 'input', ...event }),
+    insertText: (text) => events.push({ kind: 'text', text }),
+  }
+
+  replaceFocusedText(webContents, 'hello', 'win32')
+  sendNativeKey(webContents, 'Enter')
+
+  assert.deepEqual(events, [
+    { kind: 'input', type: 'keyDown', keyCode: 'A', modifiers: ['control'] },
+    { kind: 'input', type: 'keyUp', keyCode: 'A', modifiers: ['control'] },
+    { kind: 'input', type: 'keyDown', keyCode: 'Backspace' },
+    { kind: 'input', type: 'keyUp', keyCode: 'Backspace' },
+    { kind: 'text', text: 'hello' },
+    { kind: 'input', type: 'keyDown', keyCode: 'Enter' },
+    { kind: 'input', type: 'keyUp', keyCode: 'Enter' },
+  ])
+  assert.match(main, /replaceFocusedText\(webContents, value, process\.platform\)/)
+  assert.match(main, /sendNativeKey\(webContents, key\)/)
+  assert.doesNotMatch(main, /target\.dispatchEvent\(new KeyboardEvent/)
+})
+
+test('embedded browser native text replacement uses the macOS command modifier', () => {
+  const events = []
+  const webContents = {
+    sendInputEvent: (event) => events.push(event),
+    insertText: () => {},
+  }
+  replaceFocusedText(webContents, 'test', 'darwin')
+  assert.deepEqual(events.slice(0, 2), [
+    { type: 'keyDown', keyCode: 'A', modifiers: ['meta'] },
+    { type: 'keyUp', keyCode: 'A', modifiers: ['meta'] },
+  ])
 })
