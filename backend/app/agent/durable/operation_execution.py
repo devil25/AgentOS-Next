@@ -36,11 +36,29 @@ def _block_run(run_id: str, lifecycle: object | None) -> None:
     _request_review(lifecycle)
 
 
+def _assert_operation_dispatch_allowed(
+    operation: "OperationExecution", *, begin_run: bool = False
+) -> None:
+    """Permit only the non-mutating Chrome page inventory through workspace quarantine."""
+    safe_page_inventory = (
+        operation.trusted_builtin
+        and operation.tool_name.strip().lower() == "mcp__chrome-devtools__list_pages"
+        and operation.effect_class == "read_only"
+    )
+    assert_dispatch_allowed(
+        operation.durable_run,
+        operation.lifecycle,
+        begin_run=begin_run,
+        allow_shared_workspace_read_only=safe_page_inventory,
+    )
+
+
 def assert_dispatch_allowed(
     durable_run: object | None,
     lifecycle: object | None = None,
     *,
     begin_run: bool = False,
+    allow_shared_workspace_read_only: bool = False,
 ) -> None:
     """Recheck pause, lease, owner, overlap and unresolved-operation fences.
 
@@ -77,7 +95,9 @@ def assert_dispatch_allowed(
     # barrier, and workspace/conversation conflicts.
     from app.agent.durable.recovery import assert_run_dispatch_allowed
 
-    assert_run_dispatch_allowed(durable_run)
+    assert_run_dispatch_allowed(
+        durable_run, allow_shared_workspace_read_only=allow_shared_workspace_read_only
+    )
 
     journal = _field(durable_run, "journal")
     if journal is None:
@@ -216,7 +236,7 @@ class OperationExecution:
                         "external_effect_unknown",
                         "This operation cannot be replayed without a trusted preflight result.",
                     )
-                assert_dispatch_allowed(self.durable_run, self.lifecycle, begin_run=True)
+                _assert_operation_dispatch_allowed(self, begin_run=True)
                 self._active_approval_ticket_id = (
                     self._pending_ticket_id
                     if self._pending_ticket_status == "pending_approval"
@@ -230,7 +250,7 @@ class OperationExecution:
                 self._attested_preflight_ticket_id = ""
                 self._pending_resume = False
                 return
-            assert_dispatch_allowed(self.durable_run, self.lifecycle)
+            _assert_operation_dispatch_allowed(self)
             if self._status == "prepared":
                 self._transition("authorized")
             if self._status != "authorized":
@@ -678,8 +698,16 @@ def prepare_tool_operation(
     """Persist a prepared operation before any handler work is scheduled."""
     if durable_run is None:
         return None
-    assert_dispatch_allowed(durable_run, lifecycle)
     policy = classify_tool(tool_name, trusted_builtin=trusted_builtin)
+    safe_page_inventory = (
+        trusted_builtin
+        and str(tool_name or "").strip().lower() == "mcp__chrome-devtools__list_pages"
+        and policy.effect_class == "read_only"
+    )
+    assert_dispatch_allowed(
+        durable_run, lifecycle,
+        allow_shared_workspace_read_only=safe_page_inventory,
+    )
     operation_id = f"op-{uuid.uuid4().hex}"
     operation = OperationExecution(
         durable_run=durable_run,
