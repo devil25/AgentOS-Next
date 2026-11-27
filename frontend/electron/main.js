@@ -983,6 +983,30 @@ function startEmbeddedBrowserBridge() {
           } else if (snapshot.captureSource !== 'extension_companion') {
             snapshot.captureSource = 'dom'
           }
+          const pending = embeddedBrowserPendingSubmission
+          if (pending && pending.provider === snapshot.provider
+            && pending.origin === new URL(activeUrl).origin
+            && Date.now() - pending.submittedAt < 120000) {
+            const expected = String(pending.textPrefix || '').trim()
+            const messages = Array.isArray(snapshot.messages) ? snapshot.messages : []
+            const userIndex = messages.findLastIndex(item =>
+              item?.role === 'user' && expected && String(item.text || '').includes(expected)
+            )
+            const assistantIndex = userIndex >= 0
+              ? messages.findIndex((item, index) => index > userIndex && item?.role === 'assistant' && String(item.text || '').trim())
+              : -1
+            const stable = snapshot.stable !== false
+            if (userIndex < 0 || assistantIndex < 0 || snapshot.generating || !stable) {
+              // Do not let a previous assistant turn satisfy the new request.
+              snapshot.generating = true
+              snapshot.pendingSubmission = true
+            } else {
+              embeddedBrowserPendingSubmission = null
+              snapshot.pendingSubmission = false
+            }
+          } else if (pending && Date.now() - pending.submittedAt >= 120000) {
+            embeddedBrowserPendingSubmission = null
+          }
           return send(200, snapshot)
         }
         const payload = body ? JSON.parse(body) : {}

@@ -278,3 +278,12 @@ test('ChatGPT send confirmation uses the rendered user message, not composer cle
   assert.match(main, /composerEmpty: Boolean\(state\.composerEmpty\)/)
   assert.doesNotMatch(main, /if \(state\?\.composerFound && state\?\.composerEmpty && state\?\.userMessageVisible\)/)
 })
+
+
+test('conversation capture waits for an assistant reply after the exact submitted user message', () => {
+  assert.match(main, /embeddedBrowserPendingSubmission/)
+  assert.match(main, /messages\.findLastIndex\(item =>/)
+  assert.match(main, /index > userIndex && item\?\.role === 'assistant'/)
+  assert.match(main, /snapshot\.pendingSubmission = true/)
+  assert.match(main, /embeddedBrowserPendingSubmission = null/)
+})
