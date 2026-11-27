@@ -599,7 +599,7 @@ class ToolBatchRunner:
         steps = {step.step_id: step for step in self._execution_plan.steps}
         self.emit({"event": "plan", "data": self._execution_plan.to_dict()})
         self._sync_plan()
-        for batch in can_parallelize(calls, self.registry.get_tool):
+        for batch in can_parallelize(scoped_calls, self.registry.get_tool):
             if self.lifecycle.review_requested:
                 self.pause = TurnOutcome(
                     summary="",
