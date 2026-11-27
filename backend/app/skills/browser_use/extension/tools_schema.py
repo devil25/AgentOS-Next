@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_PAGE_ID = {"type": "number", "description": "Required target page ID from list_pages or new_page. Always pass it explicitly, including after select_page."}
+_PAGE_ID = {"type": "integer", "minimum": 1, "description": "Required positive target page ID from list_pages or new_page. Always pass it explicitly, including after select_page."}
 _UID = {"type": "string", "description": "The uid of an element on the page from the page content snapshot"}
 _SELECTOR = {"type": "string", "maxLength": 1000, "description": "CSS selector for one element in the main document. Use observed IDs/attributes; multiple matches are an error. Prefer uid for elements in snapshots or frames."}
 _TIMEOUT = {
