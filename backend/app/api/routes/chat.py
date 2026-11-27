@@ -118,7 +118,7 @@ async def chat(req: ChatRequest, request: Request):
             from app.agent.runtime import run_agent_stream
 
             reasoning_client = None
-            if req.web_chat_provider is not None and req.web_chat_page_id is not None:
+            if req.web_chat_provider is not None:
                 from app.agent.web_chat.session_store import build_web_chat_reasoning_client
 
                 reasoning_client = build_web_chat_reasoning_client(
