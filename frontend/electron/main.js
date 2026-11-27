@@ -907,7 +907,7 @@ function startEmbeddedBrowserBridge() {
                 .find(element => visible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true')
               if (!send) return { submitted: false, reason: 'send_button_unavailable' }
               send.click()
-              return { submitted: true, method: 'send_button' }
+              return { submitted: true, method: 'send_button', submittedTextPrefix: text.slice(0, 160) }
             })()`)
             if (submitted?.reason === 'composer_empty') {
               return send(409, { error: 'The ChatGPT composer is empty; no message was submitted.' })
@@ -923,6 +923,7 @@ function startEmbeddedBrowserBridge() {
             }
             const deadline = Date.now() + 5000
             while (Date.now() < deadline) {
+              const expectedPrefix = String(submitted?.submittedTextPrefix || '').slice(0, 160)
               const state = await executeEmbeddedBrowserScript(webContents, `(() => {
                 const visible = (element) => {
                   const rect = element.getBoundingClientRect()
@@ -932,9 +933,11 @@ function startEmbeddedBrowserBridge() {
                 const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
                   .find(element => visible(element) && !element.disabled)
                 const value = composer ? String(composer.value ?? composer.innerText ?? composer.textContent ?? '').trim() : ''
-                return { composerFound: Boolean(composer), composerEmpty: Boolean(composer) && !value }
+                const visiblePageText = String(document.body?.innerText || '')
+                const userMessageVisible = Boolean(expectedPrefix) && visiblePageText.includes(expectedPrefix)
+                return { composerFound: Boolean(composer), composerEmpty: Boolean(composer) && !value, userMessageVisible }
               })()`)
-              if (state?.composerFound && state?.composerEmpty) {
+              if (state?.composerFound && state?.composerEmpty && state?.userMessageVisible) {
                 return send(200, {
                   ok: true, action: 'press_key', key,
                   submitted: true, submissionVerified: true, method: submissionMethod,
