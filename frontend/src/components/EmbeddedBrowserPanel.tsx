@@ -21,10 +21,10 @@ const PROVIDERS: { id: Provider; label: string; url: string }[] = [
   { id: 'zai', label: 'Z.ai', url: 'https://chat.z.ai/' },
 ]
 
-export function EmbeddedBrowserPanel({ onClose }: { onClose: () => void }) {
+export function EmbeddedBrowserPanel({ onClose, initialProvider = 'chatgpt' }: { onClose: () => void; initialProvider?: Provider }) {
   const viewportRef = useRef<HTMLDivElement>(null)
-  const [provider, setProvider] = useState<Provider>('chatgpt')
-  const [address, setAddress] = useState('https://chatgpt.com/')
+  const [provider, setProvider] = useState<Provider>(initialProvider)
+  const [address, setAddress] = useState(PROVIDERS.find((item) => item.id === initialProvider)?.url || 'https://chatgpt.com/')
   const [state, setState] = useState<BrowserState>({
     open: false, provider: null, url: '', title: '', loading: true, canGoBack: false, canGoForward: false,
   })
@@ -54,12 +54,19 @@ export function EmbeddedBrowserPanel({ onClose }: { onClose: () => void }) {
       if (next.url) setAddress(next.url)
       if (next.error) setError(next.error)
     })
-    void api.open(provider).catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not open browser'))
     return () => {
       stop()
       void api.close().catch(() => {})
     }
   }, [api])
+
+  useEffect(() => {
+    setProvider(initialProvider)
+    setAddress(PROVIDERS.find((item) => item.id === initialProvider)?.url || '')
+    setInspection(null)
+    if (!api) return
+    void api.open(initialProvider).catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not open browser'))
+  }, [api, initialProvider])
 
   useEffect(() => {
     updateBounds()
