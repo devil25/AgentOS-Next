@@ -177,6 +177,8 @@ async def test_embedded_browser_conversation_returns_bounded_structured_messages
                 {"message_id": "a1", "role": "assistant", "text": "Hi"},
                 {"message_id": "ignored", "role": "system", "text": "not exposed"},
             ],
+            "captureSource": "accessibility_tree",
+            "accessibilityNodeCount": 4812,
             "composerReady": True,
             "generating": False,
             "loginRequired": False,
@@ -188,6 +190,10 @@ async def test_embedded_browser_conversation_returns_bounded_structured_messages
     assert captured["url"] == "http://127.0.0.1:43210/v1/conversation"
     assert result["ok"] is True
     assert [item["role"] for item in result["messages"]] == ["user", "assistant"]
+    assert result["messageCount"] == 2
+    assert result["captureSource"] == "accessibility_tree"
+    assert result["accessibilityNodeCount"] == 4812
+    assert result["pageText"] == ""
     assert result["composerReady"] is True
 
 
@@ -199,3 +205,58 @@ def test_embedded_conversation_tool_is_read_only_and_serialized():
     assert tool["metadata"]["mutates_state"] is False
     assert tool["metadata"]["parallel_safe"] is False
     assert tool["metadata"]["resource_locks"] == ["embedded_browser"]
+
+
+@pytest.mark.anyio
+async def test_embedded_browser_conversation_exposes_visible_text_fallback_when_messages_are_missing(monkeypatch):
+    monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_PORT", "43210")
+    monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_SECRET", "test-secret")
+
+    def fake_urlopen(request, timeout):
+        return _Response({
+            "ok": True,
+            "provider": "chatgpt",
+            "title": "ChatGPT",
+            "url": "https://chatgpt.com/c/abc",
+            "messages": [],
+            "captureSource": "visible_page_text_fallback",
+            "accessibilityNodeCount": 0,
+            "pageText": "The visible assistant answer",
+            "composerReady": True,
+            "generating": False,
+        })
+
+    monkeypatch.setattr(tools.urllib.request, "urlopen", fake_urlopen)
+    result = json.loads(await tools.embedded_browser_conversation())
+
+    assert result["messages"] == []
+    assert result["messageCount"] == 0
+    assert result["captureSource"] == "visible_page_text_fallback"
+    assert result["pageText"] == "The visible assistant answer"
+
+
+def test_embedded_conversation_observation_cannot_repeat_forever():
+    from app.agent.harness.tool_policy import ToolPolicy
+    from app.agent.harness.tool_protocol import ToolCallRequest
+
+    class Registry:
+        @staticmethod
+        def get_tool(name):
+            return {
+                "name": name,
+                "metadata": {
+                    "observation": True,
+                    "mutates_state": False,
+                    "risk_level": "low",
+                    "repeat_safe": False,
+                },
+            } if name == "embedded_browser_conversation" else None
+
+    policy = ToolPolicy(max_identical_calls=2)
+    registry = Registry()
+    call = ToolCallRequest("call-1", "embedded_browser_conversation", {})
+    assert policy.decide(request=call, registry=registry).allowed is True
+    assert policy.decide(request=call, registry=registry).allowed is True
+    decision = policy.decide(request=call, registry=registry)
+    assert decision.allowed is False
+    assert decision.metadata["code"] == "repeated_tool_call_blocked"
