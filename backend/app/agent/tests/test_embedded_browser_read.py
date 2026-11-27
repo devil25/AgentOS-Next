@@ -132,7 +132,7 @@ async def test_embedded_browser_type_caps_text_and_sends_index(monkeypatch):
     monkeypatch.setattr(tools.urllib.request, "urlopen", fake_urlopen)
     result = json.loads(await tools.embedded_browser_type(index=2, text="test"))
 
-    assert captured["body"] == {"action": "type", "index": 2, "text": "test"}
+    assert captured["body"] == {"action": "type", "index": 2, "text": "test", "append": False}
     assert result["ok"] is True
     assert result["characters"] == 4
 
