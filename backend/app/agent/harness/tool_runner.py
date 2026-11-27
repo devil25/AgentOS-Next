@@ -446,10 +446,10 @@ class ToolBatchRunner:
         if not internal_transport:
             self.transcript.add_tool_result(tool_result, images=image_attachments)
             if recovery_prompt:
-                self.transcript.append({"role": "user", "content": recovery_prompt})
+                self.transcript.append({"role": "user", "content": recovery_prompt, "agentos_internal_context": True})
             workflow_hint = self.browser_workflow.observe(tool_name, arguments, raw_tool_output, status)
             if workflow_hint and not recovery_prompt:
-                self.transcript.append({"role": "user", "content": workflow_hint})
+                self.transcript.append({"role": "user", "content": workflow_hint, "agentos_internal_context": True})
         return tool_result
 
 
