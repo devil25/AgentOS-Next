@@ -649,3 +649,37 @@ async def embedded_browser_navigate(*, url: str) -> str:
         return _json_output({"ok": True, **payload})
     except Exception as exc:
         return _json_output({"ok": False, "error": str(exc)[:300]})
+
+
+async def embedded_browser_conversation() -> str:
+    """Read structured, bounded conversation state from the active embedded AI provider."""
+    try:
+        payload = await _embedded_browser_request("/v1/conversation")
+        messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+        safe_messages = []
+        for item in messages[-100:]:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "")
+            message_id = str(item.get("message_id") or "")[:300]
+            message_text = str(item.get("text") or "")[:20000]
+            if role in {"user", "assistant"} and message_id and message_text:
+                safe_messages.append({
+                    "message_id": message_id,
+                    "role": role,
+                    "text": message_text,
+                    "complete": bool(item.get("complete", True)),
+                })
+        return _json_output({
+            "ok": True,
+            "provider": str(payload.get("provider") or "")[:30],
+            "title": str(payload.get("title") or "")[:300],
+            "url": str(payload.get("url") or "")[:4096],
+            "messages": safe_messages,
+            "composerReady": bool(payload.get("composerReady")),
+            "generating": bool(payload.get("generating")),
+            "loginRequired": bool(payload.get("loginRequired")),
+            "blockedReason": str(payload.get("blockedReason") or "")[:300],
+        })
+    except Exception as exc:
+        return _json_output({"ok": False, "error": str(exc)[:300]})
