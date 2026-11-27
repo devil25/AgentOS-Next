@@ -10,6 +10,7 @@ const { backendLaunch } = require('./backend-launch.cjs')
 const { createUpdateController } = require('./updates.cjs')
 const { portInUse, startupFailureMessage } = require('./backend-startup.cjs')
 const { showStartupMessage } = require('./message-window.cjs')
+const { sendNativeKey, replaceFocusedText } = require('./embedded-browser-input.cjs')
 const { backendPort, useDevelopmentRenderer } = require('./runtime-options.cjs')
 const {
   generateControlSecret,
@@ -579,14 +580,6 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     return { title: document.title, url: location.href, provider, messages, composerReady: Boolean(composer), generating, loginRequired, blockedReason: '' }
   }
   if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
-  if (action === 'press_key') {
-    const key = String(args.key || '')
-    if (!['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'].includes(key)) throw new Error('Unsupported key')
-    const target = document.activeElement || document.body
-    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
-    target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true }))
-    return { ok: true, action, key }
-  }
   const index = Number(args.index)
   if (!Number.isInteger(index) || index < 0 || index >= elements.length) throw new Error('Element index is no longer available; take a fresh snapshot')
   const element = elements[index]
@@ -602,16 +595,10 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     const value = String(args.text || '')
     if (value.length > 4000) throw new Error('Text is too long (maximum 4000 characters)')
     element.focus()
-    if (element.isContentEditable) {
-      element.textContent = value
-    } else {
-      const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
-      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
-      if (!setter) throw new Error('The selected field cannot be updated')
-      setter.call(element, value)
+    if (document.activeElement !== element && !element.contains(document.activeElement)) {
+      throw new Error('The selected text field could not receive focus')
     }
-    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
+    // Actual text insertion is performed by Electron's native WebContents input API.
     return { ok: true, action, index, characters: value.length }
   }
   throw new Error('Unsupported embedded browser action')
@@ -661,9 +648,24 @@ function startEmbeddedBrowserBridge() {
         }
         const allowed = new Set(['snapshot', 'click', 'type', 'press_key'])
         if (!allowed.has(payload.action)) return send(400, { error: 'Unsupported embedded browser action' })
-        const args = { index: payload.index, text: payload.text, key: payload.key }
+        const webContents = embeddedBrowserView.webContents
+        if (payload.action === 'press_key') {
+          const key = String(payload.key || '')
+          if (!['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'].includes(key)) {
+            return send(400, { error: 'Unsupported key' })
+          }
+          sendNativeKey(webContents, key)
+          return send(200, { ok: true, action: 'press_key', key })
+        }
+        const args = { index: payload.index, text: payload.text }
         const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})(${JSON.stringify(payload.action)}, ${JSON.stringify(args)})`
-        const result = await embeddedBrowserView.webContents.executeJavaScript(script, true)
+        const result = await webContents.executeJavaScript(script, true)
+        if (payload.action === 'type') {
+          const value = String(payload.text || '')
+          if (value.length > 4000) return send(413, { error: 'Text is too long (maximum 4000 characters)' })
+          const inserted = replaceFocusedText(webContents, value, process.platform)
+          return send(200, { ...result, ...inserted })
+        }
         return send(200, result)
       } catch (error) {
         send(409, { error: error.message || 'Embedded browser action failed' })
