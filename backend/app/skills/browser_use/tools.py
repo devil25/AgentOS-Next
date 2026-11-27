@@ -702,7 +702,7 @@ def _compact_embedded_conversation_messages(messages: list[Any]) -> tuple[list[d
     for position in selected_positions:
         item = normalized[position][1]
         is_latest_assistant = position == latest_assistant
-        limit = 24000 if is_latest_assistant else 2000
+        limit = 16000 if is_latest_assistant else 1200
         message_text = item["text"]
         was_truncated = len(message_text) > limit
         if was_truncated:
