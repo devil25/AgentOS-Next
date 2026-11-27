@@ -530,6 +530,64 @@ let embeddedBrowserBridgeServer = null
 let embeddedBrowserBridgePort = 0
 const EMBEDDED_BROWSER_BRIDGE_SECRET = generateControlSecret()
 
+const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
+  const visible = (element) => {
+    const rect = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+  }
+  const selector = 'button,a[href],input:not([type="password"]):not([type="hidden"]):not([type="file"]),textarea,[contenteditable="true"],[role="button"],[role="textbox"]'
+  const elements = Array.from(document.querySelectorAll(selector)).filter(visible).slice(0, 200)
+  const describe = (element, index) => ({
+    index,
+    tag: element.tagName.toLowerCase(),
+    role: element.getAttribute('role') || '',
+    type: element.getAttribute('type') || '',
+    text: String(element.innerText || element.textContent || '').trim().slice(0, 240),
+    label: String(element.getAttribute('aria-label') || element.getAttribute('title') || '').slice(0, 240),
+    placeholder: String(element.getAttribute('placeholder') || '').slice(0, 240),
+    disabled: Boolean(element.disabled),
+    editable: element.isContentEditable || ['INPUT','TEXTAREA'].includes(element.tagName)
+  })
+  if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
+  const index = Number(args.index)
+  if (!Number.isInteger(index) || index < 0 || index >= elements.length) throw new Error('Element index is no longer available; take a fresh snapshot')
+  const element = elements[index]
+  if (action === 'click') {
+    if (element.disabled) throw new Error('The selected element is disabled')
+    element.scrollIntoView({ block: 'center', inline: 'nearest' })
+    element.click()
+    return { ok: true, action, index, description: describe(element, index) }
+  }
+  if (action === 'type') {
+    if (element.disabled || !(element.isContentEditable || ['INPUT','TEXTAREA'].includes(element.tagName))) throw new Error('The selected element is not an editable text field')
+    if (element.tagName === 'INPUT' && ['password','file','hidden'].includes(String(element.type).toLowerCase())) throw new Error('This input type is not supported')
+    const value = String(args.text || '')
+    if (value.length > 4000) throw new Error('Text is too long (maximum 4000 characters)')
+    element.focus()
+    if (element.isContentEditable) {
+      element.textContent = value
+    } else {
+      const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+      if (!setter) throw new Error('The selected field cannot be updated')
+      setter.call(element, value)
+    }
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+    return { ok: true, action, index, characters: value.length }
+  }
+  if (action === 'press_key') {
+    const key = String(args.key || '')
+    if (!['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'].includes(key)) throw new Error('Unsupported key')
+    const target = document.activeElement || element
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true }))
+    return { ok: true, action, key }
+  }
+  throw new Error('Unsupported embedded browser action')
+}`
+
 async function inspectEmbeddedBrowserPage() {
   if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
   const result = await embeddedBrowserView.webContents.executeJavaScript(EMBEDDED_PAGE_INSPECTION_SCRIPT, true)
@@ -551,17 +609,30 @@ function startEmbeddedBrowserBridge() {
         response.end(JSON.stringify(payload))
       }
       if (!loopback || !authorized) return send(401, { error: 'Unauthorized' })
-      if (request.method !== 'POST' || request.url !== '/v1/inspect') return send(404, { error: 'Not found' })
+      if (request.method !== 'POST' || !['/v1/inspect', '/v1/action'].includes(request.url)) return send(404, { error: 'Not found' })
       let body = ''
       for await (const chunk of request) {
         body += chunk.toString('utf8')
-        if (body.length > 1024) return send(413, { error: 'Request too large' })
+        if (body.length > 16 * 1024) return send(413, { error: 'Request too large' })
       }
       try {
-        const result = await inspectEmbeddedBrowserPage()
-        send(200, result)
+        if (request.url === '/v1/inspect') return send(200, await inspectEmbeddedBrowserPage())
+        const payload = body ? JSON.parse(body) : {}
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return send(400, { error: 'Invalid action payload' })
+        if (!embeddedBrowserView || embeddedBrowserView.webContents.isDestroyed()) throw new Error('The embedded browser is not open')
+        if (payload.action === 'navigate') {
+          const url = embeddedSafeUrl(payload.url)
+          await embeddedBrowserView.webContents.loadURL(url)
+          return send(200, { ok: true, action: 'navigate', url: embeddedSafeUrl(embeddedBrowserView.webContents.getURL()) })
+        }
+        const allowed = new Set(['snapshot', 'click', 'type', 'press_key'])
+        if (!allowed.has(payload.action)) return send(400, { error: 'Unsupported embedded browser action' })
+        const args = { index: payload.index, text: payload.text, key: payload.key }
+        const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})(${JSON.stringify(payload.action)}, ${JSON.stringify(args)})`
+        const result = await embeddedBrowserView.webContents.executeJavaScript(script, true)
+        return send(200, result)
       } catch (error) {
-        send(409, { error: error.message || 'Embedded browser page is unavailable' })
+        send(409, { error: error.message || 'Embedded browser action failed' })
       }
     })
     embeddedBrowserBridgeServer.once('error', reject)
