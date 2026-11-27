@@ -57,6 +57,7 @@ TEST_GROUPS = {
         "test_tool_registry_enhanced.py",
         "test_builtin_mcp.py",
         "test_turn_loop.py",
+        "test_explicit_tool_scope.py",
     },
     "policy": {
         "test_data_scope.py",
