@@ -181,12 +181,13 @@ class WebChatLLMClient:
                 result_text = str(latest_result.get("content") or "")
                 if "AgentOS tool result for embedded_browser_conversation:" in result_text:
                     prompt = (
-                        "AgentOS has already read the active browser conversation. Inspect the captured "
-                        "messages and pageText below. When they contain the assistant's answer to the "
-                        "latest user prompt, return that answer as your final response. Do not call "
-                        "embedded_browser_conversation again unless a new browser action has changed "
-                        "the page. If capture evidence is empty, explain that limitation instead of polling.\n\n"
-                        + result_text + "\n\n" + action_instruction()
+                        "AgentOS has already completed one read of the active embedded conversation. "
+                        "Use the latest captured user/assistant exchange below to answer the ORIGINAL "
+                        "AgentOS request. Do not repeat the read or call embedded_browser_conversation "
+                        "again unless a new browser action changed the page. If the capture contains no "
+                        "assistant text or pageText, state that limitation clearly.\\n\\n"
+                        "Original AgentOS request:\\n" + goal[:6000] + "\\n\\n"
+                        "Bounded browser evidence:\\n" + result_text[:30000]
                     )
                 else:
                     prompt = (
