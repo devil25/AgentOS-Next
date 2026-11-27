@@ -61,7 +61,7 @@ test('embedded browser exposes only fixed interaction actions through its authen
   for (const action of ['snapshot', 'click', 'type', 'press_key']) {
     assert.match(main, new RegExp(`'${action}'`))
   }
-  assert.match(main, /!\\['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'\\]\\.includes\\(key\\)/)
+  assert.ok(main.includes("if (!['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'].includes(key))"))
   assert.match(main, /input:not\(\[type="password"\]\)/)
   assert.match(main, /payload\.action === 'navigate'/)
   assert.match(main, /embeddedSafeUrl\(payload\.url\)/)
