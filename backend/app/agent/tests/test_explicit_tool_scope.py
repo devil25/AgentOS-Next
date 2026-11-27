@@ -1,6 +1,6 @@
 import pytest
 
-from app.agent.explicit_tool_scope import explicit_tool_scope
+from app.agent.explicit_tool_scope import explicit_tool_scope, filter_tool_calls
 
 
 @pytest.mark.parametrize("request,allowed", [
@@ -33,3 +33,28 @@ def test_scope_matches_namespaced_mcp_tool_names_without_allowing_other_tools():
     assert scope.allows("mcp__chrome_devtools__list_pages")
     assert not scope.allows("inspect_web_chat")
     assert not scope.allows("mcp__chrome_devtools__inspect_web_chat")
+
+
+
+def test_only_allowed_tool_is_retained_and_extra_calls_are_blocked_before_dispatch():
+    scope = explicit_tool_scope("Use the tool `list_pages` only.")
+    assert scope is not None
+    calls = [
+        {"name": "list_pages", "arguments": {}},
+        {"name": "inspect_web_chat", "arguments": {"pageId": 1}},
+    ]
+    allowed, blocked = filter_tool_calls(scope, calls)
+    assert allowed == [calls[0]]
+    assert blocked == ["inspect_web_chat"]
+
+
+def test_namespaced_allowed_tool_is_retained_but_other_mcp_tools_are_blocked():
+    scope = explicit_tool_scope("Use `list_pages` only.")
+    assert scope is not None
+    calls = [
+        {"name": "mcp__chrome_devtools__list_pages", "arguments": {}},
+        {"name": "mcp__chrome_devtools__inspect_web_chat", "arguments": {"pageId": 1}},
+    ]
+    allowed, blocked = filter_tool_calls(scope, calls)
+    assert allowed == [calls[0]]
+    assert blocked == ["mcp__chrome_devtools__inspect_web_chat"]
