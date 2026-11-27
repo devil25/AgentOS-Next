@@ -179,6 +179,38 @@ async def test_turn_allows_provider_query_and_fragment_changes_for_same_conversa
 
 
 @pytest.mark.anyio
+async def test_turn_allows_chatgpt_legacy_and_canonical_hosts_for_same_conversation():
+    old = AssistantMessage("old", "Earlier response", True)
+    new = AssistantMessage("new", "Completed response", True)
+    browser = FakeBrowser([
+        snapshot([old], url="https://chat.openai.com/c/task-a"),
+        snapshot([old, new], url="https://chatgpt.com/c/task-a"),
+        snapshot([old, new], url="https://chatgpt.com/c/task-a"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=2)
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Continue", expected_provider="chatgpt",
+        expected_conversation_url="https://chat.openai.com/c/task-a",
+    )
+    assert turn.assistant_message.text == "Completed response"
+
+
+@pytest.mark.anyio
+async def test_turn_still_rejects_different_chatgpt_conversation_across_host_aliases():
+    old = AssistantMessage("old", "Earlier response", True)
+    browser = FakeBrowser([
+        snapshot([old], url="https://chat.openai.com/c/task-a"),
+        snapshot([old], url="https://chatgpt.com/c/task-b"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+    with pytest.raises(WebChatAdapterError, match="conversation changed"):
+        await adapter.send_and_wait(
+            tab_id=12, prompt="Continue", expected_provider="chatgpt",
+            expected_conversation_url="https://chat.openai.com/c/task-a",
+        )
+
+
+@pytest.mark.anyio
 async def test_initial_turn_rejects_switch_from_existing_conversation():
     old = AssistantMessage("old", "Earlier response", True)
     browser = FakeBrowser([
