@@ -95,7 +95,7 @@ test('ChatGPT response capture falls back to Chromium accessibility tree when DO
   assert.match(main, /Accessibility\.getFullAXTree/)
   assert.match(main, /DOM\.resolveNode/)
   assert.match(main, /Runtime\.callFunctionOn/)
-  assert.match(main, /captureSource = 'accessibility_tree'/)
+  assert.match(main, /snapshot\.captureSource = snapshot\.messages\.length \? 'accessibility_tree' : 'none'/)
   assert.match(main, /inspectEmbeddedAccessibilityMessages\(\)/)
   assert.match(main, /data-message-author-role/)
   assert.match(main, /chatgpt said/)
