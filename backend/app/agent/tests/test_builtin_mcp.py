@@ -26,18 +26,27 @@ def _runtime(settings_data: AgentSettings):
 
 
 
-def test_browser_context_preserves_actionable_extension_connection_error():
+@pytest.mark.parametrize("response", [
+    {
+        "ok": True,
+        "is_error": True,
+        "content": [{"type": "text", "text": "Chrome is open but the Monaw extension has not connected."}],
+    },
+    {
+        "ok": False,
+        "status": "error",
+        "error": {"code": "mcp_disconnected", "message": "The MCP server is not connected."},
+    },
+])
+def test_browser_context_preserves_actionable_extension_connection_error(response):
     from app.skills.mcp_bridge.registry import _browser_context
 
     class Manager:
         def call_tool_sync(self, _name, _arguments):
-            return json.dumps({
-                "ok": True,
-                "is_error": True,
-                "content": [{"type": "text", "text": "Chrome is open but the Monaw extension has not connected."}],
-            })
+            return json.dumps(response)
 
-    with pytest.raises(ValueError, match="Chrome is open but the Monaw extension has not connected"):
+    expected = "Chrome is open but the Monaw extension has not connected." if response.get("is_error") else "The MCP server is not connected."
+    with pytest.raises(ValueError, match=expected):
         _browser_context(Manager(), "list_pages", {})
 
 
