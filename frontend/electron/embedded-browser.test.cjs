@@ -205,7 +205,7 @@ test('ChatGPT capture falls back to visible main-region evidence when AX message
   const capture = main.slice(start, end)
   assert.ok(capture.includes('const rawNodes = Array.isArray(tree?.nodes) ? tree.nodes : []'))
   assert.doesNotMatch(capture, /slice\(0, 4000\)/)
-  assert.match(capture, /node\.parentId/)
+  assert.match(capture, /current\\.parentId/)
   assert.match(capture, /roledescription/)
   assert.match(main, /contentRoot = document\.querySelector\('main,\[role="main"\]'\)/)
   assert.match(main, /visible_page_text_fallback/)
