@@ -51,6 +51,13 @@ _MEDIUM_RISK_TOOLS = {
     "append_file",
 }
 
+_EMBEDDED_BROWSER_PAGE_MUTATION_TOOLS = {
+    "embedded_browser_click",
+    "embedded_browser_type",
+    "embedded_browser_press_key",
+    "embedded_browser_navigate",
+}
+
 
 class ToolPolicy:
     def __init__(self, *, max_identical_calls: int = 2) -> None:
@@ -99,6 +106,12 @@ class ToolPolicy:
             risk=risk,
             metadata={"signature": signature, "repeat_count": repeat_count + 1},
         )
+
+    def note_successful_page_action(self, tool_name: str) -> None:
+        """Allow one fresh conversation read after the embedded page changes."""
+        if tool_name in _EMBEDDED_BROWSER_PAGE_MUTATION_TOOLS:
+            signature = tool_call_signature("embedded_browser_conversation", {})
+            self._call_counts.pop(signature, None)
 
     def classify_risk(self, tool_name: str, tool: dict | None = None) -> str:
         # Reflected provider metadata can raise the display risk, never lower
