@@ -681,8 +681,35 @@ function startEmbeddedBrowserBridge() {
           if (!['Enter','Escape','Tab','ArrowUp','ArrowDown','Backspace'].includes(key)) {
             return send(400, { error: 'Unsupported key' })
           }
+          // ChatGPT can be configured to keep Enter as a newline. When the
+          // composer contains text, prefer its explicit enabled Send button;
+          // this confirms a submit action instead of assuming Enter sent it.
+          if (key === 'Enter' && ['chatgpt.com', 'chat.openai.com'].includes(new URL(webContents.getURL()).hostname)) {
+            const submitted = await webContents.executeJavaScript(`(() => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect()
+                const style = getComputedStyle(element)
+                return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+              }
+              const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
+                .find(element => visible(element) && !element.disabled)
+              const text = composer ? String(composer.value ?? composer.innerText ?? composer.textContent ?? '').trim() : ''
+              if (!text) return { submitted: false, reason: 'composer_empty' }
+              const send = Array.from(document.querySelectorAll('button[data-testid="send-button"],button[aria-label*="Send" i],button[aria-label*="Send message" i]'))
+                .find(element => visible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true')
+              if (!send) return { submitted: false, reason: 'send_button_unavailable' }
+              send.click()
+              return { submitted: true, method: 'send_button' }
+            })()`, true)
+            if (submitted?.submitted) {
+              return send(200, { ok: true, action: 'press_key', key, ...submitted })
+            }
+            if (submitted?.reason === 'composer_empty') {
+              return send(409, { error: 'The ChatGPT composer is empty; no message was submitted.' })
+            }
+          }
           sendNativeKey(webContents, key)
-          return send(200, { ok: true, action: 'press_key', key })
+          return send(200, { ok: true, action: 'press_key', key, submitted: key === 'Enter' ? 'unverified_native_enter' : false })
         }
         const args = { index: payload.index, text: payload.text }
         const script = `(${EMBEDDED_BROWSER_INTERACTION_SCRIPT})(${JSON.stringify(payload.action)}, ${JSON.stringify(args)})`
