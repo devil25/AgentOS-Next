@@ -1,8 +1,4 @@
-"""Parse explicit single-tool restrictions from the current user request.
-
-This is an execution boundary, not a prompt hint: when a user names one tool
-and says to use it only, all other model tool calls are withheld from dispatch.
-"""
+"""Parse and retain explicit single-tool restrictions for one AgentOS turn."""
 from __future__ import annotations
 
 import re
@@ -11,11 +7,11 @@ from dataclasses import dataclass
 
 _TOOL_TOKEN = r"[A-Za-z][A-Za-z0-9_.:-]*"
 _PATTERNS = (
-    re.compile(rf"\b(?:use|using|call|invoke|execute)\s+(?:(?:the|only)\s+)?(?:tool\s+)?[`'\"“”]?({_TOOL_TOKEN})[`'\"“”]?\s+only\b", re.IGNORECASE),
-    re.compile(rf"\bonly\s+(?:use|call|invoke|execute)\s+(?:(?:the)\s+)?(?:tool\s+)?[`'\"“”]?({_TOOL_TOKEN})[`'\"“”]?", re.IGNORECASE),
+    re.compile(rf"\b(?:use|using|call|invoke|execute)\s+(?:(?:the|only)\s+)?(?:tool\s+)?[`'\\"“”]?({_TOOL_TOKEN})[`'\\"“”]?\s+only\b", re.IGNORECASE),
+    re.compile(rf"\bonly\s+(?:use|call|invoke|execute)\s+(?:(?:the)\s+)?(?:tool\s+)?[`'\\"“”]?({_TOOL_TOKEN})[`'\\"“”]?", re.IGNORECASE),
 )
-_ARABIC_PATTERN = re.compile(rf"(?:استخدم|استعمل|نفّذ|نفذ)\s+(?:(?:الأداة|أداة)\s+)?[`'\"“”]?({_TOOL_TOKEN})[`'\"“”]?\s+فقط")
-_ARABIC_USING_PATTERN = re.compile(rf"باستخدام\s+(?:(?:الأداة|أداة)\s+)?[`\'\"“”]?({_TOOL_TOKEN})[`\'\"“”]?\s+فقط")
+_ARABIC_PATTERN = re.compile(rf"(?:استخدم|استعمل|نفّذ|نفذ)\s+(?:(?:الأداة|أداة)\s+)?[`'\\"“”]?({_TOOL_TOKEN})[`'\\"“”]?\s+فقط")
+_ARABIC_USING_PATTERN = re.compile(rf"باستخدام\s+(?:(?:الأداة|أداة)\s+)?[`'\\"“”]?({_TOOL_TOKEN})[`'\\"“”]?\s+فقط")
 
 
 @dataclass(frozen=True)
@@ -26,6 +22,24 @@ class ExplicitToolScope:
         name = str(tool_name or "").strip().lower()
         allowed = self.allowed_tool.lower()
         return name == allowed or name.endswith("__" + allowed) or name.endswith("_" + allowed)
+
+
+class ExplicitToolScopeGuard:
+    """Latch the original user restriction for the lifetime of one turn.
+
+    Later model/tool-result messages must never replace the user's original
+    allowlist with a broader or empty scope.
+    """
+
+    def __init__(self) -> None:
+        self._resolved = False
+        self._scope: ExplicitToolScope | None = None
+
+    def resolve(self, user_request: str) -> ExplicitToolScope | None:
+        if not self._resolved:
+            self._scope = explicit_tool_scope(user_request)
+            self._resolved = True
+        return self._scope
 
 
 def filter_tool_calls(scope: ExplicitToolScope, calls: list[dict]) -> tuple[list[dict], list[str]]:
