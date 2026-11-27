@@ -131,8 +131,8 @@ def register_browser_tools(registry, settings) -> None:
             {
                 "name": "embedded_browser_type",
                 "description": "Replace text in a visible non-password text field by index from the latest embedded_browser_snapshot. Does not submit the form.",
-                "parameters": {"type": "object", "properties": {"index": {"type": "integer", "minimum": 0, "maximum": 199}, "text": {"type": "string", "maxLength": 4000}}, "required": ["index", "text"]},
-                "callable": lambda index, text, **_unused: embedded_browser_type(index=index, text=text),
+                "parameters": {"type": "object", "properties": {"index": {"type": "integer", "minimum": 0, "maximum": 199}, "text": {"type": "string", "maxLength": 4000}, "append": {"type": "boolean", "default": false}}, "required": ["index", "text"]},
+                "callable": lambda index, text, append=False, **_unused: embedded_browser_type(index=index, text=text, append=append),
                 "domain": "browser", "execution_mode": "async", "timeout_seconds": 15.0,
                 "metadata": {"observation": False, "mutates_state": True, "risk_level": "medium", "parallel_safe": False, "resource_locks": ["embedded_browser"], "repeat_safe": False},
             },
