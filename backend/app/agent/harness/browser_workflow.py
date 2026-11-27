@@ -84,6 +84,13 @@ class BrowserWorkflow:
             hint = self._hint("scripts", "Before generating another page script, check whether inspect_element can answer the DOM question, wait_for can handle readiness, or fill_form can perform the field updates. Use evaluate_script when the dedicated tools cannot express the task.") or hint
         return hint
 
+    def _priority_hint(self, kind: str, text: str) -> str:
+        """Preserve critical result-consumption guidance even after ordinary hints."""
+        if kind in self._hinted:
+            return ""
+        self._hinted.add(kind)
+        return "Browser workflow guidance: " + text
+
     def _hint(self, kind: str, text: str) -> str:
         if kind in self._hinted or len(self._hinted) >= 4:
             return ""
