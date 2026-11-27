@@ -141,3 +141,22 @@ async def test_adapter_persists_initial_and_newly_created_conversation_urls():
         "https://chatgpt.com/",
         "https://chatgpt.com/c/created",
     ]
+
+
+@pytest.mark.anyio
+async def test_turn_accepts_an_automatically_resolved_page_id():
+    old = AssistantMessage("old", "Earlier response", True)
+    new = AssistantMessage("new", "Completed", True)
+
+    class AutoResolvedBrowser(FakeBrowser):
+        resolved_page_id = 23
+
+    browser = AutoResolvedBrowser([
+        snapshot([old]), snapshot([old, new]), snapshot([old, new]),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=2)
+    turn = await adapter.send_and_wait(
+        tab_id=None, prompt="Use the detected tab", expected_provider="chatgpt",
+    )
+    assert turn.tab_id == 23
+    assert browser.submitted == [(23, "Use the detected tab")]
