@@ -905,7 +905,7 @@ function startEmbeddedBrowserBridge() {
               if (!text) return { submitted: false, reason: 'composer_empty' }
               const send = Array.from(document.querySelectorAll('button[data-testid="send-button"],button[aria-label*="Send" i],button[aria-label*="Send message" i]'))
                 .find(element => visible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true')
-              if (!send) return { submitted: false, reason: 'send_button_unavailable' }
+              if (!send) return { submitted: false, reason: 'send_button_unavailable', submittedTextPrefix: text.slice(0, 160) }
               send.click()
               return { submitted: true, method: 'send_button', submittedTextPrefix: text.slice(0, 160) }
             })()`)
