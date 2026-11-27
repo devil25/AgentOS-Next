@@ -667,7 +667,7 @@ export default function App() {
         approvalMode={approvalMode}
         onOpenPermissions={() => openSettings('permissions')}
         actions={
-          <>
+          <div className="flex items-center gap-2">
             <button type="button" onClick={() => setShowEmbeddedBrowser(true)}
               className="no-drag inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-500/30 px-2 text-xs text-emerald-200 hover:bg-emerald-500/10"
               aria-label="Open embedded browser" title="Open embedded browser">
@@ -691,7 +691,7 @@ export default function App() {
                 )
               })()}
           />
-          </>
+          </div>
         }
       />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
