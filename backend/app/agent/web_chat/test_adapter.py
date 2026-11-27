@@ -27,7 +27,7 @@ def snapshot(messages=(), *, url="https://chatgpt.com/", generating=False,
     return ConversationSnapshot(
         url=url, title="ChatGPT", messages=tuple(messages),
         composer_ready=composer, generating=generating,
-        login_required=login, blocked_reason=blocked,
+        login_required=login, blocked_reason=blocked, context_limit=context_limit,
     )
 
 
