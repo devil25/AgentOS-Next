@@ -95,9 +95,12 @@ def assert_dispatch_allowed(
     # barrier, and workspace/conversation conflicts.
     from app.agent.durable.recovery import assert_run_dispatch_allowed
 
-    assert_run_dispatch_allowed(
-        durable_run, allow_shared_workspace_read_only=allow_shared_workspace_read_only
-    )
+    if allow_shared_workspace_read_only:
+        assert_run_dispatch_allowed(durable_run, allow_shared_workspace_read_only=True)
+    else:
+        # Keep the legacy one-argument call shape for ordinary dispatches;
+        # test doubles and integrations may intentionally expose that contract.
+        assert_run_dispatch_allowed(durable_run)
 
     journal = _field(durable_run, "journal")
     if journal is None:
