@@ -29,7 +29,9 @@ async def test_embedded_browser_read_requires_local_bridge_configuration(monkeyp
 
     assert result == {
         "ok": False,
-        "error": "Could not read the active AgentOS embedded browser page.",
+        "status": "error",
+        "reason_code": "embedded_browser_read_failed",
+        "error": "The AgentOS embedded browser bridge is not available.",
     }
 
 
@@ -78,7 +80,9 @@ async def test_embedded_browser_read_hides_bridge_errors(monkeypatch):
 
     assert result == {
         "ok": False,
-        "error": "Could not read the active AgentOS embedded browser page.",
+        "status": "error",
+        "reason_code": "embedded_browser_read_failed",
+        "error": "private socket details",
     }
 
 
@@ -135,6 +139,34 @@ async def test_embedded_browser_type_caps_text_and_sends_index(monkeypatch):
     assert captured["body"] == {"action": "type", "index": 2, "text": "test", "append": False}
     assert result["ok"] is True
     assert result["characters"] == 4
+
+
+@pytest.mark.anyio
+async def test_embedded_browser_type_reports_context_error_as_recoverable_tool_failure(monkeypatch):
+    from io import BytesIO
+
+    monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_PORT", "43210")
+    monkeypatch.setenv("AGENTOS_EMBEDDED_BROWSER_SECRET", "test-secret")
+
+    def fail(*_args, **_kwargs):
+        raise tools.urllib.error.HTTPError(
+            "http://127.0.0.1:43210/v1/action",
+            409,
+            "Conflict",
+            {},
+            BytesIO(json.dumps({
+                "error": "The provider page execution context changed during type.",
+                "code": "browser_execution_context_changed",
+            }).encode("utf-8")),
+        )
+
+    monkeypatch.setattr(tools.urllib.request, "urlopen", fail)
+    result = json.loads(await tools.embedded_browser_type(index=1, text="hello"))
+
+    assert result["ok"] is False
+    assert result["status"] == "error"
+    assert result["reason_code"] == "embedded_browser_type_failed"
+    assert "execution context changed" in result["error"]
 
 
 @pytest.mark.anyio
@@ -197,6 +229,33 @@ async def test_embedded_browser_conversation_returns_bounded_structured_messages
     assert result["accessibilityNodeCount"] == 4812
     assert result["pageText"] == ""
     assert result["composerReady"] is True
+
+
+def test_conversation_read_budget_resets_after_successful_browser_mutation_only():
+    from app.agent.harness.tool_policy import ToolPolicy
+    from app.agent.harness.tool_protocol import ToolCallRequest
+
+    class Registry:
+        @staticmethod
+        def get_tool(name):
+            return {"name": name, "metadata": {"repeat_safe": False}} if name == "embedded_browser_conversation" else None
+
+    policy = ToolPolicy(max_identical_calls=2)
+    registry = Registry()
+    read = ToolCallRequest("read", "embedded_browser_conversation", {})
+    assert policy.decide(request=read, registry=registry).allowed
+    assert policy.decide(request=read, registry=registry).allowed
+    assert not policy.decide(request=read, registry=registry).allowed
+
+    # An observation alone must not permit another unchanged read.
+    policy.note_successful_page_action("embedded_browser_snapshot")
+    assert not policy.decide(request=read, registry=registry).allowed
+
+    # A completed mutation changes the page, so one new capture cycle is valid.
+    policy.note_successful_page_action("embedded_browser_type")
+    assert policy.decide(request=read, registry=registry).allowed
+    assert policy.decide(request=read, registry=registry).allowed
+    assert not policy.decide(request=read, registry=registry).allowed
 
 
 def test_embedded_conversation_tool_is_read_only_and_serialized():
