@@ -679,7 +679,9 @@ function startEmbeddedBrowserBridge() {
         }
         return send(200, result)
       } catch (error) {
-        send(409, { error: error.message || 'Embedded browser action failed' })
+        const detail = String(error && error.message || 'Embedded browser action failed').slice(0, 500)
+        console.warn('[embedded-browser] bridge request failed', { path: request.url, error: detail })
+        send(409, { error: detail })
       }
     })
     embeddedBrowserBridgeServer.once('error', reject)
