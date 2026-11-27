@@ -709,6 +709,7 @@ export default function App() {
           onRefreshConversation={(id) => {
             if (id === activeConvId) handleRefreshChat()
           }}
+          onRefreshConversations={() => { void loadConversations() }}
           onOpenSettings={() => openSettings()}
           scheduledTasks={scheduledTasks}
           actionFeedback={actionFeedback}
