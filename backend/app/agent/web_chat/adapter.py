@@ -60,12 +60,16 @@ class WebChatSessionAdapter:
         poll_interval: float = 0.75,
         timeout: float = 180.0,
         stable_polls: int = 3,
+        empty_generation_grace: float = 8.0,
         on_conversation_url: Callable[[str], None] | None = None,
     ) -> None:
         self.browser = browser
         self.poll_interval = max(0.1, poll_interval)
-        self.timeout = max(5.0, timeout)
+        # A provider UI that reports "generating" forever must never trap a
+        # durable AgentOS turn in a long polling loop.
+        self.timeout = max(5.0, min(float(timeout), 60.0))
         self.stable_polls = max(1, stable_polls)
+        self.empty_generation_grace = max(0.1, min(float(empty_generation_grace), 15.0))
         self.on_conversation_url = on_conversation_url
 
     @staticmethod
@@ -113,6 +117,7 @@ class WebChatSessionAdapter:
         deadline = asyncio.get_running_loop().time() + self.timeout
         last_candidate: AssistantMessage | None = None
         stable_count = 0
+        empty_generation_since: float | None = None
         while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(self.poll_interval)
             current = await self.browser.inspect(tab_id)
@@ -135,6 +140,17 @@ class WebChatSessionAdapter:
                 raise WebChatAdapterError("The provider session expired. Sign in again in Chrome.")
             if current.blocked_reason:
                 raise WebChatAdapterError(current.blocked_reason)
+            now = asyncio.get_running_loop().time()
+            if current.generating and not current.messages:
+                if empty_generation_since is None:
+                    empty_generation_since = now
+                elif now - empty_generation_since >= self.empty_generation_grace:
+                    raise WebChatAdapterError(
+                        "The provider reports generation but exposes no conversation messages. "
+                        "The prompt was not confirmed; polling stopped to prevent a loop."
+                    )
+            else:
+                empty_generation_since = None
             candidates = [
                 item for item in current.messages
                 if item.role == "assistant" and item.message_id not in previous_ids and item.text.strip()
