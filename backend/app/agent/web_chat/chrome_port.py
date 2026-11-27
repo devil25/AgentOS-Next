@@ -104,6 +104,8 @@ class ChromeWebChatBrowserPort:
             raise WebChatAdapterError("A provider is required for automatic Chrome page discovery.")
         result = await self._call("list_pages", {})
         pages_text = self._result_text(result)
+        # Some MCP text renderers encode line breaks inside a single text block.
+        pages_text = pages_text.replace("\\n", "\n")
         matches: list[tuple[int, str, str]] = []
         for line in pages_text.splitlines():
             match = re.match(r"^\s*(\d+):\s*(.*?)\s*$", line)
