@@ -31,7 +31,7 @@ async def test_embedded_browser_read_requires_local_bridge_configuration(monkeyp
         "ok": False,
         "status": "error",
         "reason_code": "embedded_browser_read_failed",
-        "error": "The AgentOS embedded browser bridge is not available.",
+        "error": "Could not read the active AgentOS embedded browser page.",
     }
 
 
@@ -82,7 +82,7 @@ async def test_embedded_browser_read_hides_bridge_errors(monkeypatch):
         "ok": False,
         "status": "error",
         "reason_code": "embedded_browser_read_failed",
-        "error": "private socket details",
+        "error": "Could not read the active AgentOS embedded browser page.",
     }
 
 
