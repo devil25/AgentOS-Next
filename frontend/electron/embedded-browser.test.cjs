@@ -283,10 +283,15 @@ test('background companion observations are authenticated, provider-bound, and s
   assert.match(main, /captureSource: 'extension_companion'/)
 })
 
-test('ChatGPT send confirmation uses a newly rendered user turn or assistant reply, not composer clearing', () => {
-  assert.match(main, /if \(state\?\.userMessageVisible \|\| state\?\.assistantMessageVisible\)/)
-  assert.match(main, /composerEmpty: Boolean\(state\.composerEmpty\)/)
-  assert.doesNotMatch(main, /if \(state\?\.composerFound && state\?\.composerEmpty && state\?\.userMessageVisible\)/)
+test('ChatGPT send acknowledgement is separated from asynchronous reply confirmation', () => {
+  assert.match(main, /submissionAccepted: true/)
+  assert.match(main, /submissionPending: true/)
+  assert.match(main, /awaiting_companion_observation/)
+  assert.match(main, /pending\.textPrefix/)
+  assert.match(main, /companionAssistantIndex/)
+  assert.match(main, /snapshot\.pendingSubmission = true/)
+  assert.match(main, /embeddedBrowserPendingSubmission = null/)
+  assert.doesNotMatch(main, /Date\.now\(\) - pending\.submittedAt >= 120000/)
 })
 
 
