@@ -920,30 +920,49 @@ function startEmbeddedBrowserBridge() {
           const currentProvider = embeddedProviderForUrl(currentUrl)
           let offeredUrl
           try { offeredUrl = embeddedSafeUrl(payload.url) } catch { return send(400, { error: 'Invalid companion page URL' }) }
+          const offered = new URL(offeredUrl)
+          const active = new URL(currentUrl)
+          const documentId = String(payload.documentId || '').slice(0, 128)
+          const sequence = Number(payload.sequence)
+          const sourceObservedAt = Number(payload.observedAt)
+          if (!documentId || !Number.isSafeInteger(sequence) || sequence < 1
+            || !Number.isFinite(sourceObservedAt) || sourceObservedAt <= 0) {
+            return send(400, { error: 'Companion observation is missing its document identity or sequence' })
+          }
           if (!currentProvider || payload.provider !== currentProvider || payload.provider !== embeddedBrowserProvider
-            || new URL(offeredUrl).origin !== new URL(currentUrl).origin) {
-            return send(409, { error: 'Companion observation does not match the active provider page' })
+            || offered.origin !== active.origin || offered.pathname !== active.pathname) {
+            return send(409, { error: 'Companion observation does not match the active provider conversation' })
+          }
+          const previous = embeddedCompanionSnapshot
+          if (previous && previous.documentId === documentId
+            && (sequence <= previous.sequence || sourceObservedAt < previous.sourceObservedAt)) {
+            return send(202, { ok: true, accepted: false, stale: true, sequence: previous.sequence })
+          }
+          if (previous && sourceObservedAt < previous.sourceObservedAt) {
+            return send(202, { ok: true, accepted: false, stale: true, sequence: previous.sequence })
           }
           const messages = Array.isArray(payload.messages) ? payload.messages.slice(-50).map((item, index) => ({
             message_id: String(item?.message_id || `companion-${index}`).slice(0, 200),
             role: item?.role === 'user' || item?.role === 'assistant' ? item.role : '',
             text: String(item?.text || '').slice(0, 2500),
-            complete: item?.complete !== false,
+            complete: item?.complete === true,
           })).filter(item => item.role && item.text.trim()) : []
           embeddedCompanionSnapshot = {
-            provider: currentProvider,
+            provider: currentProvider, documentId, sequence,
+            eventType: String(payload.eventType || 'conversation_changed').slice(0, 40),
+            sourceObservedAt,
             title: String(payload.title || currentContents.getTitle()).slice(0, 300),
-            url: currentUrl,
-            messages,
+            url: currentUrl, messages,
             composerReady: Boolean(payload.composerReady),
             generating: Boolean(payload.generating),
             loginRequired: Boolean(payload.loginRequired),
+            blockedReason: String(payload.blockedReason || '').slice(0, 500),
             stable: Boolean(payload.stable),
             stableForMs: Math.max(0, Math.min(60000, Number(payload.stableForMs) || 0)),
             observedAt: Date.now(),
             captureSource: 'extension_companion',
           }
-          return send(202, { ok: true, accepted: true, messageCount: messages.length })
+          return send(202, { ok: true, accepted: true, sequence, eventType: embeddedCompanionSnapshot.eventType, messageCount: messages.length })
         }
         if (request.url === '/v1/inspect') return send(200, await inspectEmbeddedBrowserPage())
         if (request.url === '/v1/conversation') {
@@ -954,11 +973,11 @@ function startEmbeddedBrowserBridge() {
             && Date.now() - companion.observedAt < 30000
             && companion.provider === embeddedBrowserProvider
             && new URL(companion.url).origin === new URL(activeUrl).origin
+            && new URL(companion.url).pathname === new URL(activeUrl).pathname
           const pending = embeddedBrowserPendingSubmission
           const companionMessages = Array.isArray(companion?.messages) ? companion.messages : []
           const expectedPendingText = pending && pending.provider === embeddedBrowserProvider
             && pending.origin === new URL(activeUrl).origin
-            && Date.now() - pending.submittedAt < 120000
             ? String(pending.textPrefix || '').trim() : ''
           const baselineAssistantTexts = new Set((pending?.baselineAssistantTexts || []).map(value =>
             String(value || '').replace(/\s+/g, ' ').trim()
@@ -1066,9 +1085,6 @@ function startEmbeddedBrowserBridge() {
               embeddedBrowserPendingSubmission = null
               snapshot.pendingSubmission = false
             }
-          } else if (pending && Date.now() - pending.submittedAt >= 120000) {
-            embeddedBrowserPendingSubmission = null
-          }
           return send(200, snapshot)
         }
         const payload = body ? JSON.parse(body) : {}
@@ -1177,90 +1193,26 @@ function startEmbeddedBrowserBridge() {
             } else if (!submitted?.submitted) {
               return send(409, { error: 'ChatGPT did not expose a verifiable send action.' })
             }
-            const deadline = Date.now() + 15000
-            while (Date.now() < deadline) {
-              const expectedPrefix = String(submitted?.submittedTextPrefix || '').slice(0, 160)
-              const baselineUserSignatures = Array.isArray(submitted?.baselineUserSignatures)
-                ? submitted.baselineUserSignatures : []
-              const baselineAssistantTexts = Array.isArray(submitted?.baselineAssistantTexts)
-                ? submitted.baselineAssistantTexts : []
-              const state = await executeEmbeddedBrowserScript(webContents, `(() => {
-                const expectedPrefix = ${JSON.stringify(expectedPrefix)}
-                const baselineUserSignatures = new Set(${JSON.stringify(baselineUserSignatures)})
-                const baselineAssistantTexts = new Set(${JSON.stringify(baselineAssistantTexts)})
-                const normalize = value => String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()
-                const visible = element => {
-                  const rect = element.getBoundingClientRect()
-                  const style = getComputedStyle(element)
-                  return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
-                }
-                const userSelector = [
-                  '[data-message-author-role="user"]', '[data-role="user"]', '[data-author="user"]',
-                  '[data-message-role="user"]', '[data-author-role="user"]', '[data-turn-role="user"]',
-                  '[data-message-author="user"]', '[data-conversation-role="user"]', '[data-turn="user"]',
-                  '[data-testid^="conversation-turn-"][data-turn="user"]',
-                  '[data-test-id^="conversation-turn-"][data-turn="user"]',
-                  'section[data-turn="user"]', '[data-chatgpt-search-unit-key$=":user"]',
-                  '[data-content-search-unit-key$=":user"]'
-                ].join(',')
-                const assistantSelector = [
-                  '[data-message-author-role="assistant"]', '[data-role="assistant"]', '[data-author="assistant"]',
-                  '[data-message-role="assistant"]', '[data-author-role="assistant"]', '[data-turn-role="assistant"]',
-                  '[data-message-author="assistant"]', '[data-conversation-role="assistant"]', '[data-turn="assistant"]',
-                  '[data-testid^="conversation-turn-"][data-turn="assistant"]',
-                  '[data-test-id^="conversation-turn-"][data-turn="assistant"]',
-                  'section[data-turn="assistant"]', '[data-chatgpt-search-unit-key$=":assistant"]',
-                  '[data-content-search-unit-key$=":assistant"]', '[data-markdown-text-style="assistant-message"]'
-                ].join(',')
-                const identity = (element, value) => String(
-                  element.getAttribute('data-message-id') || element.getAttribute('data-testid')
-                  || element.getAttribute('data-test-id') || element.getAttribute('data-turn-id')
-                  || element.id || value
-                )
-                const collect = selector => Array.from(document.querySelectorAll(selector))
-                  .filter(visible)
-                  .map(element => {
-                    const content = element.querySelector('[data-message-content],.markdown,.message-content') || element
-                    const text = normalize(content.innerText || content.textContent)
-                    return { key: identity(element, text) + '|' + text, text }
-                  }).filter(item => item.text)
-                const composers = Array.from(document.querySelectorAll('#prompt-textarea,[data-testid="prompt-textarea"],textarea,[contenteditable="true"],[role="textbox"]'))
-                  .filter(element => visible(element) && !element.disabled)
-                const composer = composers.find(element => element.id === 'prompt-textarea' || element.getAttribute('data-testid') === 'prompt-textarea')
-                  || composers[0]
-                const value = composer ? normalize(composer.value ?? composer.innerText ?? composer.textContent) : ''
-                const userMessageVisible = Boolean(expectedPrefix) && collect(userSelector)
-                  .some(item => item.text.includes(expectedPrefix) && !baselineUserSignatures.has(item.key))
-                const assistantMessageVisible = collect(assistantSelector)
-                  .some(item => !baselineAssistantTexts.has(item.text))
-                return {
-                  composerFound: Boolean(composer),
-                  composerEmpty: Boolean(composer) && !value,
-                  userMessageVisible,
-                  assistantMessageVisible
-                }
-              })()`)
-              if (state?.userMessageVisible || state?.assistantMessageVisible) {
-                embeddedBrowserPendingSubmission = {
-                  provider: 'chatgpt',
-                  origin: new URL(webContents.getURL()).origin,
-                  textPrefix: expectedPrefix,
-                  baselineAssistantTexts,
-                  submittedAt: Date.now(),
-                }
-                return send(200, {
-                  ok: true, action: 'press_key', key,
-                  submitted: true, submissionVerified: true,
-                  submissionEvidence: state.userMessageVisible ? 'rendered_user_turn' : 'new_assistant_reply',
-                  composerEmpty: Boolean(state.composerEmpty),
-                  method: submissionMethod,
-                })
-              }
-              await new Promise(resolve => setTimeout(resolve, 150))
+            const expectedPrefix = String(submitted?.submittedTextPrefix || '').slice(0, 160)
+            const baselineAssistantTexts = Array.isArray(submitted?.baselineAssistantTexts)
+              ? submitted.baselineAssistantTexts : []
+            // A successful UI send action is acknowledged immediately. The
+            // companion observer confirms the rendered user turn and completed
+            // assistant reply asynchronously; do not hold this IPC call open.
+            embeddedBrowserPendingSubmission = {
+              provider: 'chatgpt',
+              origin: new URL(webContents.getURL()).origin,
+              textPrefix: expectedPrefix,
+              baselineAssistantTexts,
+              submittedAt: Date.now(),
+              submissionMethod,
             }
-            return send(409, {
-              error: 'ChatGPT did not expose the submitted user turn or a new assistant reply after the send attempt.',
-              code: 'chatgpt_submission_unconfirmed',
+            return send(202, {
+              ok: true, action: 'press_key', key,
+              submitted: true, submissionAccepted: true, submissionPending: true,
+              submissionVerified: false,
+              submissionEvidence: 'awaiting_companion_observation',
+              method: submissionMethod,
             })
           }
           sendNativeKey(webContents, key)
