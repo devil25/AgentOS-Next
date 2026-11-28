@@ -492,3 +492,43 @@ async def test_web_chat_client_never_dispatches_a_conversation_read_twice_after_
     assert "safely stopped" in second.content
     assert "pageText=answer" in second.content
     assert len(adapter.prompts) == 2
+
+@pytest.mark.anyio
+async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_after_it():
+    payload = {
+        "protocol": "agentos.v1",
+        "type": "action",
+        "id": "read-after-plan",
+        "action": "embedded_browser_conversation",
+        "arguments": {},
+    }
+    import json
+    repeated_read = FENCE + "json\\n" + json.dumps(payload) + "\\n" + FENCE
+    adapter = FakeAdapter([repeated_read])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    user = {"role": "user", "content": "Create a folder, write a file, and verify it"}
+    captured = {
+        "role": "user",
+        "content": "AgentOS tool result for embedded_browser_conversation: pageText=Captured provider response",
+        "tool_result": True,
+        "web_chat_action_result": True,
+    }
+    plan_result = {
+        "role": "tool",
+        "content": "Task plan created with three execution steps.",
+        "tool_result": True,
+    }
+    response = await client.chat_with_tools(
+        messages=[user, captured, plan_result],
+        tools=[{
+            "name": "embedded_browser_conversation",
+            "description": "Read the active embedded AI conversation",
+            "parameters": {"type": "object", "properties": {}},
+        }],
+    )
+    assert response.finish_reason == "stop"
+    assert "safely stopped" in response.content
+    assert "Captured provider response" in response.content
+    assert "Task plan created" in adapter.prompts[0][1]
+    assert len(adapter.prompts) == 1
+
