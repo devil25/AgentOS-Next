@@ -1091,7 +1091,12 @@ function startEmbeddedBrowserBridge() {
               ? messages.findIndex((item, index) => index > userIndex && item?.role === 'assistant' && normalizeMessageText(item.text))
               : newAssistantIndex
             const stable = snapshot.stable !== false
-            if (assistantIndex < 0 || snapshot.generating || !stable) {
+            if (snapshot.blockedReason) {
+              // A provider rejection (for example, an overlong prompt) is a
+              // terminal submission result, not an indefinitely pending turn.
+              embeddedBrowserPendingSubmission = null
+              snapshot.pendingSubmission = false
+            } else if (assistantIndex < 0 || snapshot.generating || !stable) {
               // Prefer the exact user-turn relationship; otherwise require a newly
               // rendered assistant message not present in the pre-send baseline.
               snapshot.generating = true
