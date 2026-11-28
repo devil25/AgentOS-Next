@@ -24,6 +24,9 @@ async def barrier(name: str) -> None:
     (CONTROL / f"{name}.started").touch()
     while not (CONTROL / f"{name}.release").exists():
         await asyncio.sleep(0.05)
+    # Let tests distinguish "release requested" from the blocked provider
+    # actually resuming and leaving its await point before Electron teardown.
+    record("barrier_released", name=name)
 
 
 def record(kind: str, **fields) -> None:
