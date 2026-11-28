@@ -287,6 +287,27 @@ class WebChatLLMClient:
             action = reply.action
             if action is None:
                 raise RuntimeError("The web-chat response did not contain a valid AgentOS action.")
+            # A browser conversation read is a one-shot evidence capture. Once
+            # its result is in the transcript, a provider must summarize that
+            # evidence instead of asking AgentOS to execute the identical read
+            # again. Stop the repeated action here, before durable journaling
+            # or tool dispatch can turn it into repeated_tool_call_blocked.
+            if (
+                latest_result is not None
+                and "AgentOS tool result for embedded_browser_conversation:" in str(latest_result.get("content") or "")
+                and action.name == "embedded_browser_conversation"
+            ):
+                evidence = str(latest_result.get("content") or "")[:12_000]
+                final_text = (
+                    "The browser conversation was already read once. The provider repeated "
+                    "the same read request, so AgentOS safely stopped it instead of executing "
+                    "a duplicate. Captured evidence follows; do not treat missing fields as "
+                    "proof that the provider had no response.\\n\\n"
+                    + evidence
+                )
+                if stream_callback is not None:
+                    await stream_callback(final_text)
+                return LLMResponse(content=final_text, finish_reason="stop")
             call_id = action.action_id
             # A new action ID must not let the provider spin forever on the
             # same empty conversation read. Count consecutive identical reads
