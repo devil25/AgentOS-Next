@@ -236,6 +236,9 @@ jobs:
         shell: bash
         # Electron's postinstall downloads from GitHub, which has returned 504s on CI.
         run: for attempt in 1 2 3; do npm ci && exit 0; echo "npm ci failed (attempt $attempt)"; sleep 20; done; exit 1
+      - name: Validate Electron main-process JavaScript syntax
+        working-directory: frontend
+        run: node --check electron/main.js
       - name: Verify application workflows and OS-encrypted MCP lifecycle
         working-directory: frontend
         run: npm run test:app
