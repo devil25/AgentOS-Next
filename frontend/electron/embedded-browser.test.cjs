@@ -290,6 +290,8 @@ test('ChatGPT send acknowledgement is separated from asynchronous reply confirma
   assert.match(main, /submissionPending: true/)
   assert.match(main, /awaiting_companion_observation/)
   assert.match(main, /pending\.textPrefix/)
+  assert.match(main, /conversationPath: new URL\(webContents\.getURL\(\)\)\.pathname/)
+  assert.match(main, /pendingRouteMatches/)
   assert.match(main, /companionAssistantIndex/)
   assert.match(main, /snapshot\.pendingSubmission = true/)
   assert.match(main, /embeddedBrowserPendingSubmission = null/)
