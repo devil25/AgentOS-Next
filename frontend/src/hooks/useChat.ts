@@ -8,6 +8,7 @@ import {
   type PlanEvent,
   type PlanStep,
   type StepEvent,
+  type TaskProgressEvent,
   type AccessGrantRequiredEvent,
   type SavedMessage,
   type WebChatTarget,
@@ -74,6 +75,7 @@ export interface Message {
   thinking?: string
   activityItems?: ActivityItem[]
   plan?: PlanStep[]
+  taskProgress?: TaskProgressEvent
   stepProgress?: StepProgress[]
   runStatus?: 'streaming' | 'complete' | 'paused' | 'error'
   responseStartedAtMs?: number
@@ -569,6 +571,11 @@ export function useChat(conversationId: string | null) {
         }))
       }
 
+      const handleTaskProgress = (taskProgress: TaskProgressEvent) => {
+        resetIdleTimer()
+        updateMsg((m) => ({ ...m, taskProgress }))
+      }
+
       const handleStepStart = (data: StepEvent) => {
         updateMsg((m) => ({
           ...m,
@@ -830,6 +837,7 @@ export function useChat(conversationId: string | null) {
         runId,
         follow?.run_id,
         webChatTarget,
+        handleTaskProgress,
       )
 
       abortRef.current = abort
