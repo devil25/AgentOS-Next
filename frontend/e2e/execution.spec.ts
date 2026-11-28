@@ -69,5 +69,10 @@ test('execution UI reads the real Run routes and accepts a keyboard Stop once', 
   await expect(desktop.page.getByRole('button', { name: 'Stop execution' })).toHaveCount(0)
 
   await desktop.signal('stream.release')
+  // Do not tear down Electron while the controlled provider call is still
+  // resuming from its barrier; this removes a race with backend shutdown.
+  await expect.poll(async () => (await desktop.events()).some((event) =>
+    event.kind === 'barrier_released' && event.name === 'stream',
+  )).toBe(true)
   expect(desktop.errors).toEqual([])
 })
