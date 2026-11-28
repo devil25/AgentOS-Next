@@ -173,6 +173,7 @@ test('embedded browser type resolves a fresh unique composer instead of trusting
   assert.match(script, /No visible editable text composer was found; no text was entered/)
   assert.match(script, /const index = Number\(args\.index\)/)
   assert.ok(script.indexOf("if (action === 'type')") < script.indexOf('const index = Number(args.index)'))
+  assert.ok(script.indexOf("if (action === 'type')") < script.indexOf("const selector = 'button,a[href]"), 'text entry must not scan the full interactive element inventory first')
 })
 
 test('embedded browser text entry and Enter use native Electron input events', () => {
