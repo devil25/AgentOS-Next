@@ -108,10 +108,17 @@ class ToolPolicy:
         )
 
     def note_successful_page_action(self, tool_name: str) -> None:
-        """Reset accumulated conversation-read counts after a page mutation."""
+        """Reset observations after page changes and re-arm Enter after new text."""
         if tool_name in _EMBEDDED_BROWSER_PAGE_MUTATION_TOOLS:
             signature = tool_call_signature("embedded_browser_conversation", {})
             self._call_counts.pop(signature, None)
+        if tool_name == "embedded_browser_type":
+            # Enter is intentionally not repeat-safe: pressing it twice without
+            # an intervening successful edit could submit the same message twice.
+            # A successful type action establishes a new submission context, so
+            # the same Enter arguments may be used for this newly composed text.
+            enter_signature = tool_call_signature("embedded_browser_press_key", {"key": "Enter"})
+            self._call_counts.pop(enter_signature, None)
 
     def classify_risk(self, tool_name: str, tool: dict | None = None) -> str:
         # Reflected provider metadata can raise the display risk, never lower
