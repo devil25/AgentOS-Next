@@ -534,9 +534,18 @@ async function ensureEmbeddedCompanion(browserSession) {
   if (!extensions || typeof extensions.loadExtension !== 'function') {
     throw new Error('This Electron runtime does not expose session extension loading')
   }
-  const alreadyLoaded = typeof extensions.getAllExtensions === 'function'
-    && extensions.getAllExtensions().some(item => item.name === 'AgentOS Browser Companion')
-  if (!alreadyLoaded) await extensions.loadExtension(runtimeDirectory, { allowFileAccess: false })
+  const companionManifest = JSON.parse(fs.readFileSync(path.join(runtimeDirectory, 'manifest.json'), 'utf8'))
+  const loadedCompanion = typeof extensions.getAllExtensions === 'function'
+    ? extensions.getAllExtensions().find(item => item.name === companionManifest.name)
+    : null
+  if (loadedCompanion && loadedCompanion.version !== companionManifest.version) {
+    extensions.removeExtension(loadedCompanion.id)
+  }
+  const currentCompanionLoaded = typeof extensions.getAllExtensions === 'function'
+    && extensions.getAllExtensions().some(item =>
+      item.name === companionManifest.name && item.version === companionManifest.version
+    )
+  if (!currentCompanionLoaded) await extensions.loadExtension(runtimeDirectory, { allowFileAccess: false })
   embeddedCompanionLoadedSessions.add(browserSession)
   console.log('[embedded-browser] Background companion loaded for provider session')
   return true
