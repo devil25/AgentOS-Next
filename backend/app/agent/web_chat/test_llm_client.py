@@ -503,7 +503,7 @@ async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_afte
         "arguments": {},
     }
     import json
-    repeated_read = FENCE + "json\\n" + json.dumps(payload) + "\\n" + FENCE
+    repeated_read = FENCE + "json\n" + json.dumps(payload) + "\n" + FENCE
     adapter = FakeAdapter([repeated_read])
     client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
     user = {"role": "user", "content": "Create a folder, write a file, and verify it"}
