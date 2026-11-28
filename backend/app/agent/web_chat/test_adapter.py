@@ -64,6 +64,12 @@ async def test_turn_rejects_login_required_and_unready_composer():
         assert browser.submitted == []
 
 
+def test_provider_wait_has_no_default_deadline_or_empty_generation_cutoff():
+    adapter = WebChatSessionAdapter(FakeBrowser([]))
+    assert adapter.timeout is None
+    assert adapter.empty_generation_grace is None
+
+
 @pytest.mark.anyio
 async def test_turn_does_not_return_partial_or_generating_response():
     old = AssistantMessage("old", "Earlier", True)

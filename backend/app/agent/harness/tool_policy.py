@@ -134,10 +134,19 @@ class ToolPolicy:
 
     @staticmethod
     def _is_repeat_safe(tool_name: str, arguments: dict, tool: dict | None = None) -> bool:
-        # A conversation read is safe but not useful to repeat unchanged. Keep
-        # it under the ordinary identical-call budget to prevent endless polling.
-        if tool_name == "embedded_browser_conversation":
-            return False
+        # Observation and planning calls have no external side effects. They
+        # may be repeated while waiting for fresh provider state; the Run-level
+        # stuck-round guard still detects unproductive loops.
+        repeat_safe_names = {
+            "embedded_browser_conversation",
+            "embedded_browser_snapshot",
+            "embedded_browser_read",
+            "task_plan",
+            "list_pages",
+        }
+        leaf_name = tool_name.rsplit("__", 1)[-1]
+        if tool_name in repeat_safe_names or leaf_name in repeat_safe_names:
+            return True
         metadata = (tool or {}).get("metadata", {}) or {}
         if bool(metadata.get("repeat_safe")):
             return True
