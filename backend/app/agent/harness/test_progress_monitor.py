@@ -33,3 +33,23 @@ def test_companion_heartbeat_metadata_is_not_semantic_progress():
     assert not stalled
     assert not hint
     assert monitor.stalled_rounds == 1
+
+
+def test_provider_generation_wait_is_not_stopped_by_no_progress_rounds():
+    monitor = ProgressMonitor()
+    tool = {"metadata": {"observation": True, "mutates_state": False}}
+    for sequence in range(1, 21):
+        monitor.begin_round()
+        payload = {
+            "provider": "chatgpt",
+            "generating": True,
+            "pendingSubmission": True,
+            "sequence": sequence,
+            "observedAt": sequence * 1000,
+            "messages": [],
+        }
+        monitor.observe("embedded_browser_conversation", {}, json.dumps(payload), "ok", tool)
+        hint, stalled = monitor.finish_round()
+        assert not hint
+        assert not stalled
+        assert monitor.stalled_rounds == 0
