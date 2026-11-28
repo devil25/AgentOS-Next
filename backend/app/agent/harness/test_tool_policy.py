@@ -6,6 +6,7 @@ def test_browser_observation_and_planning_calls_are_repeat_safe():
     assert ToolPolicy._is_repeat_safe("embedded_browser_snapshot", {})
     assert ToolPolicy._is_repeat_safe("embedded_browser_read", {})
     assert ToolPolicy._is_repeat_safe("list_pages", {})
+    assert ToolPolicy._is_repeat_safe("mcp__chrome_devtools__list_pages", {})
     assert ToolPolicy._is_repeat_safe("task_plan", {})
 
 
