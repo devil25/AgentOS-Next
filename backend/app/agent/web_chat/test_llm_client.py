@@ -522,15 +522,29 @@ async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_afte
     }
     response = await client.chat_with_tools(
         messages=[user, captured, plan_result],
-        tools=[{
-            "name": "embedded_browser_conversation",
-            "description": "Read the active embedded AI conversation",
-            "parameters": {"type": "object", "properties": {}},
-        }],
+        tools=[
+            {
+                "name": "embedded_browser_conversation",
+                "description": "Read the active embedded AI conversation",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "exec",
+                "description": "Execute a local Windows command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
+            },
+        ],
+        system_prompt="TASK_PROTOCOL: execute each independent step and verify its result.",
     )
     assert response.finish_reason == "stop"
     assert "safely stopped" in response.content
     assert "Captured provider response" in response.content
     assert "Task plan created" in adapter.prompts[0][1]
+    assert "TASK_PROTOCOL" in adapter.prompts[0][1]
+    assert '"name":"exec"' in adapter.prompts[0][1]
     assert len(adapter.prompts) == 1
 
