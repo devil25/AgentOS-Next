@@ -286,6 +286,51 @@ async def test_turn_allows_same_accessibility_history_when_provider_spa_url_chan
 
 
 @pytest.mark.anyio
+async def test_turn_accepts_dom_identity_refresh_when_prior_assistant_content_is_preserved():
+    old_before = AssistantMessage("dom-node-before", "Earlier response remains in this thread", True)
+    old_after = AssistantMessage("dom-node-after", "Earlier response remains in this thread", True)
+    new = AssistantMessage("new-response-node", "The new completed response", True)
+    browser = FakeBrowser([
+        snapshot([old_before], url="https://chatgpt.com/c/task-a"),
+        snapshot([old_after, new], url="https://chatgpt.com/"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Continue this task", expected_provider="chatgpt",
+        expected_conversation_url="https://chatgpt.com/c/task-a",
+    )
+
+    assert turn.assistant_message.text == "The new completed response"
+
+
+@pytest.mark.anyio
+async def test_turn_rejects_different_conversation_even_when_old_text_is_repeated():
+    old = AssistantMessage("old-node", "A repeated generic response", True)
+    same_text = AssistantMessage("new-thread-node", "A repeated generic response", True)
+    browser = FakeBrowser([
+        snapshot([old], url="https://chatgpt.com/c/task-a"),
+        snapshot([same_text], url="https://chatgpt.com/c/task-b"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+
+    with pytest.raises(WebChatAdapterError, match="conversation changed"):
+        await adapter.send_and_wait(
+            tab_id=12, prompt="Continue", expected_provider="chatgpt",
+            expected_conversation_url="https://chatgpt.com/c/task-a",
+        )
+
+
+def test_embedded_browser_ports_share_one_run_isolation_lock():
+    from app.agent.web_chat.embedded_port import EmbeddedWebChatBrowserPort
+
+    first = EmbeddedWebChatBrowserPort("chatgpt")
+    second = EmbeddedWebChatBrowserPort("gemini")
+
+    assert first.operation_lock is second.operation_lock
+
+
+@pytest.mark.anyio
 async def test_embedded_stable_snapshot_browser_uses_one_post_submit_read():
     class StableSnapshotBrowser(FakeBrowser):
         provides_stable_snapshots = True
