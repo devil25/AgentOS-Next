@@ -105,7 +105,7 @@
       const text = textOf(content);
       if (!text) continue;
       const id = stableId(node);
-      const key = role + ':' + id;
+      const key = role + ':' + text;
       if (seen.has(key)) continue;
       seen.add(key);
       result.push({ message_id: id, role, text, complete: true });
