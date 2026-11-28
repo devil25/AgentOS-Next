@@ -10,12 +10,11 @@ test('Playwright verifies companion streaming and completed-response events in C
     contentType: 'text/html',
     body: '<!doctype html><html><head><title>ChatGPT observer fixture</title></head><body><main><div data-message-author-role="user" data-message-id="user-1">Run observer test</div><div data-message-author-role="assistant" data-message-id="assistant-1">Earlier reply</div><textarea placeholder="Message"></textarea></main></body></html>',
   }))
-  const providerWindow = await app.waitForEvent('window')
-  const createWindow = app.evaluate(({ BrowserWindow }) => new BrowserWindow({
+  const providerWindow = app.waitForEvent('window')
+  const windowId = await app.evaluate(({ BrowserWindow }) => new BrowserWindow({
     show: false,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   }).id)
-  const windowId = await createWindow
   const providerPage = await providerWindow
   try {
     await providerPage.addInitScript(() => {
@@ -52,7 +51,7 @@ test('Playwright verifies companion streaming and completed-response events in C
     })).toBe(true)
     const streaming = await providerPage.evaluate(() => {
       const observations = (window as Window & { __agentosObservations?: Array<Record<string, unknown>> }).__agentosObservations || []
-      return observations.findLast(item => item.eventType === 'assistant_streaming')
+      return observations.filter(item => item.eventType === 'assistant_streaming').at(-1)
     })
     expect(streaming).toMatchObject({ provider: 'chatgpt', generating: true })
     expect((streaming?.messages as Array<Record<string, unknown>>).at(-1)).toMatchObject({
@@ -69,7 +68,7 @@ test('Playwright verifies companion streaming and completed-response events in C
     }), { timeout: 10_000 }).toBe(true)
     const completed = await providerPage.evaluate(() => {
       const observations = (window as Window & { __agentosObservations?: Array<Record<string, unknown>> }).__agentosObservations || []
-      return observations.findLast(item => item.eventType === 'assistant_completed')
+      return observations.filter(item => item.eventType === 'assistant_completed').at(-1)
     })
     expect(completed).toMatchObject({ provider: 'chatgpt', generating: false, stable: true })
     expect((completed?.messages as Array<Record<string, unknown>>).at(-1)).toMatchObject({
