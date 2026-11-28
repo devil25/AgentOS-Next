@@ -456,7 +456,7 @@ async def test_web_chat_client_keeps_original_goal_when_internal_browser_guidanc
 
 
 @pytest.mark.anyio
-async def test_web_chat_client_stops_consecutive_identical_conversation_reads_with_new_action_ids():
+async def test_web_chat_client_never_dispatches_a_conversation_read_twice_after_capture():
     def read_action(action_id):
         payload = {
             "protocol": "agentos.v1",
@@ -466,12 +466,11 @@ async def test_web_chat_client_stops_consecutive_identical_conversation_reads_wi
             "arguments": {},
         }
         import json
-        return FENCE + "json\n" + json.dumps(payload) + "\n" + FENCE
+        return FENCE + "json\\n" + json.dumps(payload) + "\\n" + FENCE
 
     adapter = FakeAdapter([
         read_action("read-1"),
         read_action("read-2"),
-        read_action("read-3"),
     ])
     client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
     tools = [{
@@ -489,18 +488,7 @@ async def test_web_chat_client_stops_consecutive_identical_conversation_reads_wi
         "web_chat_action_result": True,
     }
     second = await client.chat_with_tools(messages=[user, result_one], tools=tools)
-    assert second.finish_reason == "tool_calls"
-    assert "Do not repeat the read or call embedded_browser_conversation" in adapter.prompts[1][1]
-    assert "pageText=answer" in adapter.prompts[1][1]
-    assert "Original AgentOS request:" in adapter.prompts[1][1]
-    assert "Read the response in the browser" in adapter.prompts[1][1]
-    assert "You are the reasoning engine for AgentOS-Next" not in adapter.prompts[1][1]
-    result_two = {
-        "role": "user",
-        "content": "AgentOS tool result: same pageText=answer",
-        "tool_result": True,
-        "web_chat_action_result": True,
-    }
-    with pytest.raises(RuntimeError, match="repeated embedded_browser_conversation"):
-        await client.chat_with_tools(messages=[user, result_one, result_two], tools=tools)
-    assert len(adapter.prompts) == 3
+    assert second.finish_reason == "stop"
+    assert "safely stopped" in second.content
+    assert "pageText=answer" in second.content
+    assert len(adapter.prompts) == 2
