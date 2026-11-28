@@ -1105,7 +1105,7 @@ function startEmbeddedBrowserBridge() {
               embeddedBrowserPendingSubmission = null
               snapshot.pendingSubmission = false
             }
-          }
+          } // Close pending-submission reconciliation before returning the conversation snapshot.
           return send(200, snapshot)
         }
         const payload = body ? JSON.parse(body) : {}
