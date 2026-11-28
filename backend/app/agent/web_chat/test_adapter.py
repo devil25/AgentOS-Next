@@ -305,6 +305,29 @@ async def test_turn_accepts_dom_identity_refresh_when_prior_assistant_content_is
 
 
 @pytest.mark.anyio
+async def test_turn_accepts_bounded_snapshot_when_concrete_conversation_route_is_unchanged():
+    old = AssistantMessage("old-dom-node", "Earlier assistant reply outside the capture window", True)
+    new = AssistantMessage("new-dom-node", "DEVICE-EXEC-01 action response", True)
+    thread_url = "https://chatgpt.com/c/task-bounded-window"
+    browser = FakeBrowser([
+        snapshot([old], url=thread_url),
+        # Companion snapshots are bounded; the previous assistant message can
+        # disappear from the window even though this is still the same thread.
+        snapshot([new], url=thread_url),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Run the local device test", expected_provider="chatgpt",
+        expected_conversation_url=thread_url,
+    )
+
+    assert turn.assistant_message.message_id == "new-dom-node"
+    assert turn.assistant_message.text == "DEVICE-EXEC-01 action response"
+    assert browser.submitted == [(12, "Run the local device test")]
+
+
+@pytest.mark.anyio
 async def test_turn_does_not_treat_rerendered_old_reply_as_new_response():
     old_before = AssistantMessage("old-dom-node", "Historical answer", True)
     old_after = AssistantMessage("new-dom-node", "Historical answer", True)
