@@ -302,7 +302,7 @@ class WebChatLLMClient:
                     "The browser conversation was already read once. The provider repeated "
                     "the same read request, so AgentOS safely stopped it instead of executing "
                     "a duplicate. Captured evidence follows; do not treat missing fields as "
-                    "proof that the provider had no response.\\n\\n"
+                    "proof that the provider had no response.\n\n"
                     + evidence
                 )
                 if stream_callback is not None:
