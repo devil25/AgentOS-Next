@@ -984,8 +984,15 @@ function startEmbeddedBrowserBridge() {
             && new URL(companion.url).origin === new URL(activeUrl).origin
             && new URL(companion.url).pathname === new URL(activeUrl).pathname
           const pending = embeddedBrowserPendingSubmission
+          const activePath = new URL(activeUrl).pathname
+          const pendingRouteMatches = Boolean(pending && (
+            String(pending.conversationPath || '/') === activePath
+            || String(pending.conversationPath || '/') === '/'
+          ))
+          if (pending && !pendingRouteMatches) embeddedBrowserPendingSubmission = null
           const companionMessages = Array.isArray(companion?.messages) ? companion.messages : []
-          const expectedPendingText = pending && pending.provider === embeddedBrowserProvider
+          const expectedPendingText = pending && pendingRouteMatches
+            && pending.provider === embeddedBrowserProvider
             && pending.origin === new URL(activeUrl).origin
             ? String(pending.textPrefix || '').trim() : ''
           const baselineAssistantTexts = new Set((pending?.baselineAssistantTexts || []).map(value =>
@@ -1067,7 +1074,7 @@ function startEmbeddedBrowserBridge() {
           } else if (snapshot.captureSource !== 'extension_companion') {
             snapshot.captureSource = 'dom'
           }
-          if (pending && pending.provider === snapshot.provider
+          if (pending && pendingRouteMatches && pending.provider === snapshot.provider
             && pending.origin === new URL(activeUrl).origin) {
             const expected = String(pending.textPrefix || '').trim()
             const messages = Array.isArray(snapshot.messages) ? snapshot.messages : []
@@ -1210,6 +1217,7 @@ function startEmbeddedBrowserBridge() {
             embeddedBrowserPendingSubmission = {
               provider: 'chatgpt',
               origin: new URL(webContents.getURL()).origin,
+              conversationPath: new URL(webContents.getURL()).pathname,
               textPrefix: expectedPrefix,
               baselineAssistantTexts,
               submittedAt: Date.now(),
