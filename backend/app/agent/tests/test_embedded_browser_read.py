@@ -59,7 +59,7 @@ async def test_embedded_browser_read_uses_authenticated_loopback_and_truncates(m
     assert captured == {
         "url": "http://127.0.0.1:43210/v1/inspect",
         "authorization": "Bearer test-secret",
-        "timeout": 12,
+        "timeout": 30,
     }
     assert result["ok"] is True
     assert result["title"] == "ChatGPT"
