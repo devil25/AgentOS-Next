@@ -75,6 +75,18 @@ class ProgressMonitor:
         if name == "task_plan" and isinstance(value, dict) and isinstance(value.get("task"), dict):
             value = {key: value["task"].get(key) for key in ("steps", "status", "reason")}
         value = semantic_result(value)
+        # A provider explicitly reporting generation or a pending submission is
+        # an active wait state, not a stalled tool loop. It remains cancellable
+        # by the Run lifecycle, but has no arbitrary wall-clock deadline.
+        if name == "embedded_browser_conversation" and isinstance(value, dict) and (
+            value.get("generating") is True
+            or value.get("pendingSubmission") is True
+            or value.get("stable") is False
+        ):
+            self.changed = True
+            self.observed += 1
+            self.polling = True
+            return
         # Rephrasing an empty search is still the same absence of results.
         empty_search = (
             ("search" in name or metadata.get("progress_search") is True)
