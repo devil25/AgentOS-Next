@@ -81,6 +81,16 @@ test('Playwright verifies companion streaming and completed-response events in C
     })
     expect(Number(completed?.sequence)).toBeGreaterThan(Number(streaming?.sequence))
     expect(completed?.documentId).toBe(streaming?.documentId)
+    await providerPage.evaluate(() => {
+      const alert = document.createElement('div')
+      alert.setAttribute('role', 'alert')
+      alert.textContent = 'The message you submitted was too long, please edit and resubmit.'
+      document.body.append(alert)
+    })
+    await expect.poll(async () => providerPage.evaluate(() => {
+      const observations = (window as Window & { __agentosObservations?: Array<Record<string, unknown>> }).__agentosObservations || []
+      return observations.some(item => String(item.blockedReason || '').includes('too long'))
+    })).toBe(true)
   } finally {
     await providerPage.close().catch(() => {})
     await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.close(), windowId)

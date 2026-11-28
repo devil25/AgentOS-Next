@@ -138,10 +138,10 @@
     const eventType = generating ? 'assistant_streaming'
       : lastAssistant && lastAssistant.complete ? 'assistant_completed'
       : 'conversation_changed';
-    const alerts = Array.from(document.querySelectorAll('[role="alert"],[data-testid*="error"],[data-testid*="warning"]'))
+    const alerts = Array.from(document.querySelectorAll('[role="alert"],[data-testid*="error"],[data-testid*="warning"],[data-testid*="toast"],[class*="toast"],[class*="error"],[class*="alert"]'))
       .filter(visible).map(textOf).filter(Boolean).join(' ').slice(0, 500);
     const lowerAlerts = alerts.toLowerCase();
-    const blockedReason = /message is too long|too many tokens|rate limit|try again later|captcha|verify you are human|message too long|الرسالة طويلة|حاول مرة أخرى/.test(lowerAlerts)
+    const blockedReason = /message.{0,80}too long|submitted.{0,80}too long|please edit and resubmit|too many tokens|rate limit|try again later|captcha|verify you are human|الرسالة.{0,40}طويلة|حاول مرة أخرى/.test(lowerAlerts)
       ? alerts : '';
     return {
       provider, documentId, url: location.href, title: document.title,
