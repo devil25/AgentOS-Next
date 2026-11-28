@@ -34,7 +34,11 @@ class TaskToolRegistry(ToolRegistry):
             try:
                 task = progress.update(steps, status=status, reason=reason, new_task=new_task)
                 if callable(on_update):
-                    on_update(task)
+                    try:
+                        on_update(task)
+                    except Exception:
+                        # A notification failure must not turn a committed plan into a failed tool result.
+                        pass
                 return json.dumps({"status": "ok", "task": task})
             except ValueError as exc:
                 return json.dumps(
