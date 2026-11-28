@@ -466,7 +466,7 @@ async def test_web_chat_client_never_dispatches_a_conversation_read_twice_after_
             "arguments": {},
         }
         import json
-        return FENCE + "json\\n" + json.dumps(payload) + "\\n" + FENCE
+        return FENCE + "json\n" + json.dumps(payload) + "\n" + FENCE
 
     adapter = FakeAdapter([
         read_action("read-1"),
