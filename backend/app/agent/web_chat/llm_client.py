@@ -183,10 +183,29 @@ class WebChatLLMClient:
                 max((i for i, item in enumerate(messages) if item is conversation_result), default=-1)
                 if conversation_result is not None else -1
             )
+            # ToolBatchRunner tags every dispatched tool result as a web-chat
+            # action result, including non-browser tools such as task_plan and
+            # local exec. Only a subsequent embedded-browser action can justify
+            # taking another provider conversation snapshot. Read-only browser
+            # snapshots are not page mutations either.
+            _read_only_browser_tools = {
+                "embedded_browser_conversation",
+                "embedded_browser_snapshot",
+                "embedded_browser_read",
+            }
             newer_browser_action_result = any(
                 isinstance(item, dict)
                 and item.get("web_chat_action_result") is True
-                and "AgentOS tool result for embedded_browser_conversation:" not in str(item.get("content") or "")
+                and (
+                    str(item.get("content") or "").split("AgentOS tool result for ", 1)[-1]
+                    .split(":", 1)[0].strip()
+                    .startswith("embedded_browser_")
+                )
+                and (
+                    str(item.get("content") or "").split("AgentOS tool result for ", 1)[-1]
+                    .split(":", 1)[0].strip()
+                    not in _read_only_browser_tools
+                )
                 for item in messages[conversation_result_index + 1:]
             ) if conversation_result is not None else False
             latest_user = next(
