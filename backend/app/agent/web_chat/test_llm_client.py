@@ -456,7 +456,7 @@ async def test_web_chat_client_keeps_original_goal_when_internal_browser_guidanc
 
 
 @pytest.mark.anyio
-async def test_web_chat_client_never_dispatches_a_conversation_read_twice_after_capture():
+async def test_web_chat_client_allows_a_fresh_read_only_observation_after_capture():
     def read_action(action_id):
         payload = {
             "protocol": "agentos.v1",
@@ -488,9 +488,9 @@ async def test_web_chat_client_never_dispatches_a_conversation_read_twice_after_
         "web_chat_action_result": True,
     }
     second = await client.chat_with_tools(messages=[user, result_one], tools=tools)
-    assert second.finish_reason == "stop"
-    assert "safely stopped" in second.content
-    assert "pageText=answer" in second.content
+    assert second.finish_reason == "tool_calls"
+    assert second.tool_calls
+    assert second.tool_calls[0].name == "embedded_browser_conversation"
     assert len(adapter.prompts) == 2
 
 @pytest.mark.anyio
@@ -498,13 +498,13 @@ async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_afte
     payload = {
         "protocol": "agentos.v1",
         "type": "action",
-        "id": "read-after-plan",
-        "action": "embedded_browser_conversation",
-        "arguments": {},
+        "id": "exec-after-plan",
+        "action": "exec",
+        "arguments": {"command": "Write-Output 'continue from the recorded plan'"},
     }
     import json
-    repeated_read = FENCE + "json\n" + json.dumps(payload) + "\n" + FENCE
-    adapter = FakeAdapter([repeated_read])
+    next_action = FENCE + "json\n" + json.dumps(payload) + "\n" + FENCE
+    adapter = FakeAdapter([next_action])
     client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
     user = {"role": "user", "content": "Create a folder, write a file, and verify it"}
     captured = {
@@ -540,9 +540,10 @@ async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_afte
         ],
         system_prompt="TASK_PROTOCOL: execute each independent step and verify its result.",
     )
-    assert response.finish_reason == "stop"
-    assert "safely stopped" in response.content
-    assert "Captured provider response" in response.content
+    assert response.finish_reason == "tool_calls"
+    assert response.tool_calls
+    assert response.tool_calls[0].name == "exec"
+    assert response.tool_calls[0].arguments["command"] == "Write-Output 'continue from the recorded plan'
     assert "Task plan created" in adapter.prompts[0][1]
     assert "TASK_PROTOCOL" in adapter.prompts[0][1]
     assert '"name":"exec"' in adapter.prompts[0][1]
