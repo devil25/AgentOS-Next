@@ -12,6 +12,13 @@ _VOLATILE = {
     "request_id",
     "trace_id",
     "generated_at",
+    # Companion heartbeat counters/timestamps change even when the rendered
+    # conversation is identical; they are transport freshness, not task progress.
+    "sequence",
+    "observedAt",
+    "sourceObservedAt",
+    "companionObservedAt",
+    "stableForMs",
 }
 
 
