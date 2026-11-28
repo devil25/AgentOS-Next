@@ -178,3 +178,13 @@ A provider is not considered supported merely because its website can be opened.
 - Stop, pause, resume, and browser disconnection preserve task state safely.
 
 No provider is declared production-ready until its end-to-end Chrome tests pass against the live website UI and the supported interaction flow is documented.
+
+## Event-driven embedded browser observation and long-running turns
+
+The embedded Browser Companion now publishes sequenced observations when the rendered provider UI changes. Each observation is bound to a per-document identifier, a monotonic sequence number, the active HTTPS provider origin and conversation path. The Electron loopback bridge rejects stale/out-of-order events and observations from another conversation route. Observations distinguish assistant streaming from a stable completed reply; the final assistant message remains marked incomplete while generation is active or the content is still settling.
+
+Submitting a ChatGPT prompt is acknowledged as soon as the visible Send action/native Enter action is issued. The send IPC does not wait for the provider's response. The pending prompt identity is retained until the companion observation proves the matching user turn and a subsequent completed assistant reply. This separates the short input action from the potentially long model-generation phase.
+
+The web-chat adapter has no default response deadline or empty-generation cutoff. A caller may explicitly configure a deadline, while normal AgentOS pause/stop cancellation remains available. Read-only browser observations and task-plan refreshes may be repeated; state-changing actions such as Enter, click, type, and local execution remain protected against accidental duplicate side effects. In particular, an uncertain filesystem or opaque write is not made repeat-safe merely to increase model freedom.
+
+Playwright is already part of the frontend development toolchain. It is used to exercise Electron/Chromium behavior against controlled provider-page fixtures, including observer streaming/completion transitions. This does not introduce a second browser session into the user's live signed-in workflow. Runtime browser interaction continues through the existing embedded Electron WebContentsView and authenticated Companion bridge; no public CDP debugging port or second ExtensionBridge is introduced.
