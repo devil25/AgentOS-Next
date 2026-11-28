@@ -200,6 +200,10 @@ class WebChatSessionAdapter:
             # accessibility node identities may be recreated during rerender.
             initial_path = initial_identity[1]
             current_path = current_identity[1]
+            same_concrete_conversation = (
+                initial_path not in {"", "/"}
+                and current_path == initial_path
+            )
             if (
                 initial_path not in {"", "/"}
                 and current_path not in {"", "/"}
@@ -220,7 +224,15 @@ class WebChatSessionAdapter:
             }
             has_shared_identity = bool(previous_ids & current_assistant_ids)
             has_shared_content = bool(previous_assistant_texts & current_assistant_texts)
-            if previous_ids and not (has_shared_identity or has_shared_content):
+            # The companion deliberately returns a bounded message window. When
+            # both snapshots identify the exact same concrete provider thread,
+            # older assistant messages may fall outside that window; the stable
+            # conversation route is sufficient continuity evidence. If the
+            # provider exposes only its SPA root, retain the stricter content/ID
+            # overlap requirement because there is no concrete thread identity.
+            if previous_ids and not (
+                has_shared_identity or has_shared_content or same_concrete_conversation
+            ):
                 raise WebChatAdapterError(
                     "The provider conversation changed while AgentOS was waiting; "
                     "no prior assistant message content or identity remains."
