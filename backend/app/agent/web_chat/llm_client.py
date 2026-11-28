@@ -198,10 +198,13 @@ class WebChatLLMClient:
             catalog = _select_web_chat_tool_catalog(tools, goal) if tools and goal else []
             if conversation_result is not None:
                 evidence_text = str(conversation_result.get("content") or "")
-                progress_text = (
-                    str(latest_result.get("content") or "")
-                    if latest_result is not None and latest_result is not conversation_result else ""
-                )
+                progress_items = [
+                    str(item.get("content") or "")[:4_000]
+                    for item in messages[conversation_result_index + 1:]
+                    if isinstance(item, dict) and item.get("tool_result")
+                    and item is not conversation_result
+                ][-4:]
+                progress_text = "\n\n".join(progress_items)
                 prompt = (
                     "AgentOS has already captured the active embedded conversation. Treat this "
                     "capture as durable evidence even if later task-plan/progress tool results appear "
