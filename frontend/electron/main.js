@@ -600,19 +600,6 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     const style = getComputedStyle(element)
     return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
   }
-  const selector = 'button,a[href],input:not([type="password"]):not([type="hidden"]):not([type="file"]),textarea,[contenteditable="true"],[role="button"],[role="textbox"]'
-  const elements = Array.from(document.querySelectorAll(selector)).filter(visible).slice(0, 200)
-  const describe = (element, index) => ({
-    index,
-    tag: element.tagName.toLowerCase(),
-    role: element.getAttribute('role') || '',
-    type: element.getAttribute('type') || '',
-    text: String(element.innerText || element.textContent || '').trim().slice(0, 240),
-    label: String(element.getAttribute('aria-label') || element.getAttribute('title') || '').slice(0, 240),
-    placeholder: String(element.getAttribute('placeholder') || '').slice(0, 240),
-    disabled: Boolean(element.disabled),
-    editable: element.isContentEditable || ['INPUT','TEXTAREA'].includes(element.tagName)
-  })
   if (action === 'conversation') {
     const provider = location.hostname === 'chatgpt.com' || location.hostname === 'chat.openai.com' ? 'chatgpt'
       : location.hostname === 'gemini.google.com' ? 'gemini'
@@ -685,7 +672,6 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     const contextLimit = /conversation is too long|conversation has reached its limit|context length exceeded|maximum context length|context window is full|message is too long|too many tokens|this chat is too long to continue|you have reached the maximum length for this conversation|المحادثة طويلة جداً|تجاوزت المحادثة الحد|تجاوز حد السياق/.test(contextText)
     return { title: document.title, url: location.href, provider, messages, composerReady: Boolean(composer), generating, loginRequired, contextLimit, blockedReason: '' }
   }
-  if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
   if (action === 'type') {
     // Resolve the composer again at action time. Snapshot indexes are positional
     // and can point at a different element after a provider re-render.
@@ -715,6 +701,20 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
     // Actual text insertion is performed by Electron's native WebContents input API.
     return { ok: true, action, index: elements.indexOf(element), characters: value.length }
   }
+  const selector = 'button,a[href],input:not([type="password"]):not([type="hidden"]):not([type="file"]),textarea,[contenteditable="true"],[role="button"],[role="textbox"]'
+  const elements = Array.from(document.querySelectorAll(selector)).filter(visible).slice(0, 200)
+  const describe = (element, index) => ({
+    index,
+    tag: element.tagName.toLowerCase(),
+    role: element.getAttribute('role') || '',
+    type: element.getAttribute('type') || '',
+    text: String(element.innerText || element.textContent || '').trim().slice(0, 240),
+    label: String(element.getAttribute('aria-label') || element.getAttribute('title') || '').slice(0, 240),
+    placeholder: String(element.getAttribute('placeholder') || '').slice(0, 240),
+    disabled: Boolean(element.disabled),
+    editable: element.isContentEditable || ['INPUT','TEXTAREA'].includes(element.tagName)
+  })
+  if (action === 'snapshot') return { title: document.title, url: location.href, elements: elements.map(describe) }
   const index = Number(args.index)
   if (!Number.isInteger(index) || index < 0 || index >= elements.length) throw new Error('Element index is no longer available; take a fresh snapshot')
   const element = elements[index]
