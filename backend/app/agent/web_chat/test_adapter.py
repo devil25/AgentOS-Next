@@ -305,6 +305,22 @@ async def test_turn_accepts_dom_identity_refresh_when_prior_assistant_content_is
 
 
 @pytest.mark.anyio
+async def test_turn_does_not_treat_rerendered_old_reply_as_new_response():
+    old_before = AssistantMessage("old-dom-node", "Historical answer", True)
+    old_after = AssistantMessage("new-dom-node", "Historical answer", True)
+    browser = FakeBrowser([
+        snapshot([old_before]),
+        snapshot([old_after]),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+
+    with pytest.raises(WebChatAdapterError, match="Timed out"):
+        await adapter.send_and_wait(
+            tab_id=12, prompt="Do a new task", expected_provider="chatgpt",
+        )
+
+
+@pytest.mark.anyio
 async def test_turn_rejects_different_conversation_even_when_old_text_is_repeated():
     old = AssistantMessage("old-node", "A repeated generic response", True)
     same_text = AssistantMessage("new-thread-node", "A repeated generic response", True)
