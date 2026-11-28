@@ -183,7 +183,10 @@ class EmbeddedWebChatBrowserPort:
                 "index": index, "text": chunk, "append": chunk_index > 0,
             })
         submission = await self._call("embedded_browser_press_key", {"key": "Enter"})
-        if self.provider == "chatgpt" and submission.get("submissionVerified") is not True:
+        if self.provider == "chatgpt" and not (
+            submission.get("submissionAccepted") is True
+            or submission.get("submissionVerified") is True
+        ):
             raise WebChatAdapterError(
-                "ChatGPT did not confirm that the prompt was submitted; no response wait was started."
+                "ChatGPT did not acknowledge the send action; no response wait was started."
             )
