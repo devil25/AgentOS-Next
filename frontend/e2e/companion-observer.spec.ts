@@ -8,7 +8,7 @@ test('Playwright verifies companion streaming and completed-response events in C
   await app.context().route('https://chatgpt.com/**', route => route.fulfill({
     status: 200,
     contentType: 'text/html',
-    body: '<!doctype html><html><head><title>ChatGPT observer fixture</title></head><body><main><div data-message-author-role="user" data-message-id="user-1">Run observer test</div><div data-message-author-role="assistant" data-message-id="assistant-1">Earlier reply</div><textarea placeholder="Message"></textarea></main></body></html>',
+    body: '<!doctype html><html><head><title>ChatGPT observer fixture</title></head><body><main><div data-message-author-role="user" data-message-id="user-1">Run observer test</div><div data-message-author-role="assistant" data-message-id="assistant-1"><div data-markdown-text-style="assistant-message">Earlier reply</div></div><textarea placeholder="Message"></textarea></main></body></html>',
   }))
   const providerWindow = app.waitForEvent('window')
   const windowId = await app.evaluate(({ BrowserWindow }) => new BrowserWindow({
@@ -37,6 +37,11 @@ test('Playwright verifies companion streaming and completed-response events in C
     await expect.poll(async () => providerPage.evaluate(() =>
       (window as Window & { __agentosObservations?: unknown[] }).__agentosObservations?.length || 0
     )).toBeGreaterThan(0)
+    const initial = await providerPage.evaluate(() => {
+      const observations = (window as Window & { __agentosObservations?: Array<Record<string, unknown>> }).__agentosObservations || []
+      return observations[0]
+    })
+    expect(initial?.messages).toHaveLength(2)
     await providerPage.evaluate(() => {
       const assistant = document.createElement('div')
       assistant.setAttribute('data-message-author-role', 'assistant')
