@@ -565,7 +565,7 @@ async def _embedded_browser_request(path: str, payload: dict[str, Any] | None = 
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=12) as response:
+            with urllib.request.urlopen(request, timeout=30) as response:
                 raw = response.read(512 * 1024)
         except urllib.error.HTTPError as exc:
             raw = exc.read(16 * 1024)
