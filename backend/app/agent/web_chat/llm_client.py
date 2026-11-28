@@ -170,6 +170,25 @@ class WebChatLLMClient:
                  if isinstance(item, dict) and item.get("web_chat_action_result") is True),
                 None,
             )
+            # A task-plan result or internal progress message can arrive after the
+            # browser capture. Keep the capture independently discoverable instead
+            # of assuming the newest tool result is the browser read.
+            conversation_result = next(
+                (item for item in reversed(messages)
+                 if isinstance(item, dict)
+                 and "AgentOS tool result for embedded_browser_conversation:" in str(item.get("content") or "")),
+                None,
+            )
+            conversation_result_index = (
+                max((i for i, item in enumerate(messages) if item is conversation_result), default=-1)
+                if conversation_result is not None else -1
+            )
+            newer_browser_action_result = any(
+                isinstance(item, dict)
+                and item.get("web_chat_action_result") is True
+                and "AgentOS tool result for embedded_browser_conversation:" not in str(item.get("content") or "")
+                for item in messages[conversation_result_index + 1:]
+            ) if conversation_result is not None else False
             latest_user = next(
                 (item for item in reversed(messages)
                  if isinstance(item, dict) and item.get("role") == "user" and not item.get("tool_result") and not item.get("agentos_internal_context")),
@@ -177,23 +196,30 @@ class WebChatLLMClient:
             )
             goal = str((latest_user or {}).get("content") or "").strip()
             catalog = _select_web_chat_tool_catalog(tools, goal) if tools and goal else []
-            if latest_result is not None:
+            if conversation_result is not None:
+                evidence_text = str(conversation_result.get("content") or "")
+                progress_text = (
+                    str(latest_result.get("content") or "")
+                    if latest_result is not None and latest_result is not conversation_result else ""
+                )
+                prompt = (
+                    "AgentOS has already captured the active embedded conversation. Treat this "
+                    "capture as durable evidence even if later task-plan/progress tool results appear "
+                    "after it in the transcript. Do not call embedded_browser_conversation again "
+                    "unless a NEW browser action has changed the page. Continue the ORIGINAL task "
+                    "from the recorded plan and tool results; do not restart completed steps. "
+                    "If the capture has no assistant text or pageText, state that limitation and "
+                    "continue only with actions supported by the available evidence.\n\n"
+                    "Original AgentOS request:\n" + goal[:6000] + "\n\n"
+                    "Bounded browser evidence:\n" + evidence_text[:18000]
+                    + ("\n\nLatest AgentOS progress result:\n" + progress_text[:6000] if progress_text else "")
+                )
+            elif latest_result is not None:
                 result_text = str(latest_result.get("content") or "")
-                if "AgentOS tool result for embedded_browser_conversation:" in result_text:
-                    prompt = (
-                        "AgentOS has already completed one read of the active embedded conversation. "
-                        "Use the latest captured user/assistant exchange below to answer the ORIGINAL "
-                        "AgentOS request. Do not repeat the read or call embedded_browser_conversation "
-                        "again unless a new browser action changed the page. If the capture contains no "
-                        "assistant text or pageText, state that limitation clearly.\n\n"
-                        "Original AgentOS request:\n" + goal[:6000] + "\n\n"
-                        "Bounded browser evidence:\n" + result_text[:22000]
-                    )
-                else:
-                    prompt = (
-                        "Continue the same task using this actual AgentOS execution result:\n"
-                        + result_text + "\n\n" + action_instruction()
-                    )
+                prompt = (
+                    "Continue the same task using this actual AgentOS execution result:\n"
+                    + result_text + "\n\n" + action_instruction()
+                )
             else:
                 if not goal:
                     raise RuntimeError("The web-chat provider did not receive a user task.")
@@ -293,11 +319,11 @@ class WebChatLLMClient:
             # again. Stop the repeated action here, before durable journaling
             # or tool dispatch can turn it into repeated_tool_call_blocked.
             if (
-                latest_result is not None
-                and "AgentOS tool result for embedded_browser_conversation:" in str(latest_result.get("content") or "")
+                conversation_result is not None
+                and not newer_browser_action_result
                 and action.name == "embedded_browser_conversation"
             ):
-                evidence = str(latest_result.get("content") or "")[:12_000]
+                evidence = str(conversation_result.get("content") or "")[:12_000]
                 final_text = (
                     "The browser conversation was already read once. The provider repeated "
                     "the same read request, so AgentOS safely stopped it instead of executing "
