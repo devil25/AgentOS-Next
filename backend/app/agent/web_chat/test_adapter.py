@@ -64,6 +64,12 @@ async def test_turn_rejects_login_required_and_unready_composer():
         assert browser.submitted == []
 
 
+def test_provider_wait_has_no_default_deadline_or_empty_generation_cutoff():
+    adapter = WebChatSessionAdapter(FakeBrowser([]))
+    assert adapter.timeout is None
+    assert adapter.empty_generation_grace is None
+
+
 @pytest.mark.anyio
 async def test_turn_does_not_return_partial_or_generating_response():
     old = AssistantMessage("old", "Earlier", True)
@@ -283,6 +289,90 @@ async def test_turn_allows_same_accessibility_history_when_provider_spa_url_chan
         expected_conversation_url="https://chatgpt.com/c/task-a",
     )
     assert turn.assistant_message.message_id == "stable-backend-node-202"
+
+
+@pytest.mark.anyio
+async def test_turn_accepts_dom_identity_refresh_when_prior_assistant_content_is_preserved():
+    old_before = AssistantMessage("dom-node-before", "Earlier response remains in this thread", True)
+    old_after = AssistantMessage("dom-node-after", "Earlier response remains in this thread", True)
+    new = AssistantMessage("new-response-node", "The new completed response", True)
+    browser = FakeBrowser([
+        snapshot([old_before], url="https://chatgpt.com/c/task-a"),
+        snapshot([old_after, new], url="https://chatgpt.com/"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Continue this task", expected_provider="chatgpt",
+        expected_conversation_url="https://chatgpt.com/c/task-a",
+    )
+
+    assert turn.assistant_message.text == "The new completed response"
+
+
+@pytest.mark.anyio
+async def test_turn_accepts_bounded_snapshot_when_concrete_conversation_route_is_unchanged():
+    old = AssistantMessage("old-dom-node", "Earlier assistant reply outside the capture window", True)
+    new = AssistantMessage("new-dom-node", "DEVICE-EXEC-01 action response", True)
+    thread_url = "https://chatgpt.com/c/task-bounded-window"
+    browser = FakeBrowser([
+        snapshot([old], url=thread_url),
+        # Companion snapshots are bounded; the previous assistant message can
+        # disappear from the window even though this is still the same thread.
+        snapshot([new], url=thread_url),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Run the local device test", expected_provider="chatgpt",
+        expected_conversation_url=thread_url,
+    )
+
+    assert turn.assistant_message.message_id == "new-dom-node"
+    assert turn.assistant_message.text == "DEVICE-EXEC-01 action response"
+    assert browser.submitted == [(12, "Run the local device test")]
+
+
+@pytest.mark.anyio
+async def test_turn_does_not_treat_rerendered_old_reply_as_new_response():
+    old_before = AssistantMessage("old-dom-node", "Historical answer", True)
+    old_after = AssistantMessage("new-dom-node", "Historical answer", True)
+    browser = FakeBrowser([
+        snapshot([old_before]),
+        snapshot([old_after]),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+
+    with pytest.raises(WebChatAdapterError, match="Timed out"):
+        await adapter.send_and_wait(
+            tab_id=12, prompt="Do a new task", expected_provider="chatgpt",
+        )
+
+
+@pytest.mark.anyio
+async def test_turn_rejects_different_conversation_even_when_old_text_is_repeated():
+    old = AssistantMessage("old-node", "A repeated generic response", True)
+    same_text = AssistantMessage("new-thread-node", "A repeated generic response", True)
+    browser = FakeBrowser([
+        snapshot([old], url="https://chatgpt.com/c/task-a"),
+        snapshot([same_text], url="https://chatgpt.com/c/task-b"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+
+    with pytest.raises(WebChatAdapterError, match="conversation changed"):
+        await adapter.send_and_wait(
+            tab_id=12, prompt="Continue", expected_provider="chatgpt",
+            expected_conversation_url="https://chatgpt.com/c/task-a",
+        )
+
+
+def test_embedded_browser_ports_share_one_run_isolation_lock():
+    from app.agent.web_chat.embedded_port import EmbeddedWebChatBrowserPort
+
+    first = EmbeddedWebChatBrowserPort("chatgpt")
+    second = EmbeddedWebChatBrowserPort("gemini")
+
+    assert first.operation_lock is second.operation_lock
 
 
 @pytest.mark.anyio

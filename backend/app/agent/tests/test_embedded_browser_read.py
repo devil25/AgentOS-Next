@@ -231,7 +231,7 @@ async def test_embedded_browser_conversation_returns_bounded_structured_messages
     assert result["composerReady"] is True
 
 
-def test_conversation_read_budget_resets_after_successful_browser_mutation_only():
+def test_conversation_reads_remain_repeatable_while_waiting_for_observer_updates():
     from app.agent.harness.tool_policy import ToolPolicy
     from app.agent.harness.tool_protocol import ToolCallRequest
 
@@ -243,19 +243,17 @@ def test_conversation_read_budget_resets_after_successful_browser_mutation_only(
     policy = ToolPolicy(max_identical_calls=2)
     registry = Registry()
     read = ToolCallRequest("read", "embedded_browser_conversation", {})
-    assert policy.decide(request=read, registry=registry).allowed
-    assert policy.decide(request=read, registry=registry).allowed
-    assert not policy.decide(request=read, registry=registry).allowed
+    for expected_count in range(1, 8):
+        decision = policy.decide(request=read, registry=registry)
+        assert decision.allowed
+        assert decision.metadata["repeat_count"] == expected_count
 
-    # An observation alone must not permit another unchanged read.
+    # Read-only observations and page changes both preserve the ability to
+    # obtain a fresh snapshot; state-changing tools retain their own guard.
     policy.note_successful_page_action("embedded_browser_snapshot")
-    assert not policy.decide(request=read, registry=registry).allowed
-
-    # A completed mutation changes the page, so one new capture cycle is valid.
+    assert policy.decide(request=read, registry=registry).allowed
     policy.note_successful_page_action("embedded_browser_type")
     assert policy.decide(request=read, registry=registry).allowed
-    assert policy.decide(request=read, registry=registry).allowed
-    assert not policy.decide(request=read, registry=registry).allowed
 
 
 def test_embedded_conversation_tool_is_read_only_and_serialized():
@@ -296,7 +294,7 @@ async def test_embedded_browser_conversation_exposes_visible_text_fallback_when_
     assert result["pageText"] == "The visible assistant answer"
 
 
-def test_embedded_conversation_observation_cannot_repeat_forever():
+def test_embedded_conversation_observation_can_repeat_until_the_run_progress_guard_stops_it():
     from app.agent.harness.tool_policy import ToolPolicy
     from app.agent.harness.tool_protocol import ToolCallRequest
 
@@ -316,11 +314,10 @@ def test_embedded_conversation_observation_cannot_repeat_forever():
     policy = ToolPolicy(max_identical_calls=2)
     registry = Registry()
     call = ToolCallRequest("call-1", "embedded_browser_conversation", {})
-    assert policy.decide(request=call, registry=registry).allowed is True
-    assert policy.decide(request=call, registry=registry).allowed is True
-    decision = policy.decide(request=call, registry=registry)
-    assert decision.allowed is False
-    assert decision.metadata["code"] == "repeated_tool_call_blocked"
+    for expected_count in range(1, 11):
+        decision = policy.decide(request=call, registry=registry)
+        assert decision.allowed is True
+        assert decision.metadata["repeat_count"] == expected_count
 
 
 

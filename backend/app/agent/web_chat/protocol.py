@@ -91,17 +91,29 @@ def parse_web_chat_reply(response: str, *, allowed_actions: set[str] | frozenset
     if len(text) > MAX_RESPONSE_CHARS:
         raise WebChatProtocolError("The provider response exceeded the supported size limit.")
     fences = list(_FENCE.finditer(text))
-    if not fences:
-        if "agentos.v1" in text or '"protocol"' in text:
-            raise WebChatProtocolError("The response appears to contain an action, but no valid single JSON action block was found.")
-        return WebChatReply(kind="final", text=text)
-    if len(fences) != 1:
-        raise WebChatProtocolError("Return exactly one action JSON block per assistant response.")
-    match = fences[0]
-    if (text[:match.start()] + text[match.end():]).strip():
-        raise WebChatProtocolError("An action response must contain only the fenced JSON block.")
+    if fences:
+        if len(fences) != 1:
+            raise WebChatProtocolError("Return exactly one action JSON block per assistant response.")
+        match = fences[0]
+        if (text[:match.start()] + text[match.end():]).strip():
+            raise WebChatProtocolError("An action response must contain only the fenced JSON block.")
+        json_text = match.group(1)
+    else:
+        # Some provider UIs emit a plain JSON object with a leading language
+        # label (for example, "JSON{...}") instead of preserving Markdown
+        # fences. Accept only that exact wrapper or a bare object; never scan
+        # arbitrary prose for an embedded action.
+        candidate = text
+        if re.match(r"(?i)^json\s*\{", candidate):
+            candidate = re.sub(r"(?i)^json\s*", "", candidate, count=1)
+        if candidate.lstrip().startswith("{"):
+            json_text = candidate
+        else:
+            if "agentos.v1" in text or '"protocol"' in text:
+                raise WebChatProtocolError("The response appears to contain an action, but no valid single JSON action block was found.")
+            return WebChatReply(kind="final", text=text)
     try:
-        payload = json.loads(match.group(1))
+        payload = json.loads(json_text)
     except json.JSONDecodeError as exc:
         raise WebChatProtocolError("The AgentOS action block contains invalid JSON.") from exc
     if not isinstance(payload, dict):

@@ -22,8 +22,16 @@ async def barrier(name: str) -> None:
     if not re.fullmatch(r"[a-z-]+", name):
         raise ValueError("Invalid fixture barrier")
     (CONTROL / f"{name}.started").touch()
-    while not (CONTROL / f"{name}.release").exists():
-        await asyncio.sleep(0.05)
+    try:
+        while not (CONTROL / f"{name}.release").exists():
+            await asyncio.sleep(0.05)
+    except asyncio.CancelledError:
+        # A Stop request cancels the provider while it is waiting at this
+        # controlled barrier. Record that the coroutine has actually exited
+        # its wait before the Electron fixture starts shutting down.
+        record("barrier_cancelled", name=name)
+        raise
+    record("barrier_released", name=name)
 
 
 def record(kind: str, **fields) -> None:

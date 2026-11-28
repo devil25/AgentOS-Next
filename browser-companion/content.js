@@ -1,4 +1,5 @@
-// Provider-aware observer. Runs in the page's isolated content-script world.
+// Provider-aware event observer. Runs in the page's isolated content-script world.
+// It observes rendered UI only; it never reads credentials, cookies, or storage.
 (() => {
   const host = location.hostname;
   const provider = host === 'chatgpt.com' || host === 'chat.openai.com' ? 'chatgpt'
@@ -6,6 +7,20 @@
     : host === 'chat.deepseek.com' ? 'deepseek'
     : host === 'chat.z.ai' ? 'zai' : '';
   if (!provider) return;
+
+  const documentId = (() => {
+    try { return crypto.randomUUID(); } catch { return `agentos-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+  })();
+  const nodeIds = new WeakMap();
+  let nextNodeId = 0;
+  let sequence = 0;
+  let lastPublishedSignature = '';
+  let lastObservedSignature = '';
+  let lastPublishedAt = 0;
+  let lastChangeAt = Date.now();
+  let timer = null;
+  let sending = false;
+  let dirty = true;
 
   const visible = element => {
     if (!(element instanceof Element)) return false;
@@ -16,6 +31,13 @@
   };
   const textOf = element => String(element?.innerText || element?.textContent || '')
     .replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim().slice(0, 2500);
+  const stableId = node => {
+    const supplied = node.getAttribute('data-message-id') || node.getAttribute('data-testid')
+      || node.getAttribute('data-test-id') || node.id;
+    if (supplied) return String(supplied).slice(0, 200);
+    if (!nodeIds.has(node)) nodeIds.set(node, `agentos-${provider}-${++nextNodeId}`);
+    return nodeIds.get(node);
+  };
 
   const CHATGPT_MESSAGE_SELECTORS = [
     '[data-message-author-role]',
@@ -61,54 +83,71 @@
     return '';
   }
 
-  function collectMessages() {
+  function isGenerating(nodes) {
+    const stopVisible = Array.from(document.querySelectorAll(
+      'button[data-testid*="stop"],button[aria-label*="Stop" i],button[aria-label*="Stop generating" i],[data-testid*="stop-generating"]'
+    )).some(element => visible(element) && !element.disabled);
+    const streamingMessage = nodes.some(node =>
+      node.getAttribute('data-is-streaming') === 'true'
+      || Boolean(node.querySelector('[data-is-streaming="true"]'))
+    );
+    return stopVisible || streamingMessage;
+  }
+
+  function collectMessages(nodes, generating, stable) {
     const result = [];
     const seen = new Set();
-    for (const node of messageNodes()) {
+    for (const node of nodes) {
       if (!visible(node)) continue;
       const role = roleOf(node);
       if (!role) continue;
       const content = node.querySelector('[data-message-content],.markdown,.message-content,.model-response-text') || node;
       const text = textOf(content);
       if (!text) continue;
-      const id = String(node.getAttribute('data-message-id') || node.getAttribute('data-testid') || node.id || '');
+      const id = stableId(node);
       const key = role + ':' + text;
       if (seen.has(key)) continue;
       seen.add(key);
-      result.push({ message_id: id.slice(0, 200), role, text, complete: true });
+      result.push({ message_id: id, role, text, complete: true });
     }
+    const lastAssistantIndex = result.findLastIndex(item => item.role === 'assistant');
+    if (lastAssistantIndex >= 0 && (generating || !stable)) result[lastAssistantIndex].complete = false;
     return result.slice(-50);
   }
 
-  let lastSignature = '';
-  let lastChangeAt = Date.now();
-  let timer = null;
-  let sending = false;
-  let dirty = true;
-
   function buildSnapshot() {
-    const messages = collectMessages();
+    const nodes = messageNodes();
+    const generating = isGenerating(nodes);
     const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]'))
       .find(element => visible(element) && !element.disabled && !element.readOnly);
     const passwordVisible = Array.from(document.querySelectorAll('input[type="password"]')).some(visible);
-    const stopVisible = Array.from(document.querySelectorAll('button[data-testid*="stop"],button[aria-label*="Stop" i],[data-is-streaming="true"]'))
-      .some(element => visible(element) && !element.disabled);
-    const signature = JSON.stringify(messages.map(item => [item.role, item.text]));
-    if (signature !== lastSignature) {
-      lastSignature = signature;
+    const messages = collectMessages(nodes, generating, false);
+    const signature = JSON.stringify({
+      url: location.href,
+      messages: messages.map(item => [item.message_id, item.role, item.text]),
+      generating, composerReady: Boolean(composer), loginRequired: passwordVisible
+    });
+    if (signature !== lastObservedSignature) {
+      lastObservedSignature = signature;
       lastChangeAt = Date.now();
     }
     const stableForMs = Math.max(0, Date.now() - lastChangeAt);
+    const stable = !generating && stableForMs >= 900;
+    const completeMessages = collectMessages(nodes, generating, stable);
+    const lastAssistant = completeMessages.findLast(item => item.role === 'assistant');
+    const eventType = generating ? 'assistant_streaming'
+      : lastAssistant && lastAssistant.complete ? 'assistant_completed'
+      : 'conversation_changed';
+    const alerts = Array.from(document.querySelectorAll('[role="alert"],[data-testid*="error"],[data-testid*="warning"],[data-testid*="toast"],[class*="toast"],[class*="error"],[class*="alert"]'))
+      .filter(visible).map(textOf).filter(Boolean).join(' ').slice(0, 500);
+    const lowerAlerts = alerts.toLowerCase();
+    const blockedReason = /message.{0,80}too long|submitted.{0,80}too long|please edit and resubmit|too many tokens|rate limit|try again later|captcha|verify you are human|الرسالة.{0,40}طويلة|حاول مرة أخرى/.test(lowerAlerts)
+      ? alerts : '';
     return {
-      provider,
-      url: location.href,
-      title: document.title,
-      messages,
-      composerReady: Boolean(composer),
-      generating: stopVisible,
-      loginRequired: passwordVisible,
-      stable: !stopVisible && stableForMs >= 1200,
-      stableForMs
+      provider, documentId, url: location.href, title: document.title,
+      messages: completeMessages, composerReady: Boolean(composer), generating,
+      loginRequired: passwordVisible, blockedReason, stable, stableForMs,
+      eventType, observedAt: Date.now()
     };
   }
 
@@ -117,8 +156,24 @@
     sending = true;
     dirty = false;
     const snapshot = buildSnapshot();
+    const signature = JSON.stringify({
+      url: snapshot.url, messages: snapshot.messages, generating: snapshot.generating,
+      stable: snapshot.stable, composerReady: snapshot.composerReady,
+      loginRequired: snapshot.loginRequired, blockedReason: snapshot.blockedReason
+    });
+    const now = Date.now();
+    if (signature === lastPublishedSignature && now - lastPublishedAt < 5000) {
+      sending = false;
+      return;
+    }
+    snapshot.sequence = ++sequence;
     try {
-      await chrome.runtime.sendMessage({ type: 'agentos:observation', snapshot });
+      const result = await chrome.runtime.sendMessage({ type: 'agentos:observation', snapshot });
+      if (result?.ok === false) dirty = true;
+      else {
+        lastPublishedSignature = signature;
+        lastPublishedAt = now;
+      }
     } catch {
       dirty = true;
     } finally {
@@ -129,24 +184,28 @@
   function schedule() {
     dirty = true;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { timer = null; void publish(); }, 400);
+    timer = setTimeout(() => { timer = null; void publish(); }, 120);
   }
 
   const observer = new MutationObserver(schedule);
   if (document.documentElement) observer.observe(document.documentElement, {
     subtree: true, childList: true, characterData: true, attributes: true,
-    attributeFilter: ['aria-label','aria-busy','data-is-streaming','disabled']
+    attributeFilter: ['aria-label','aria-busy','data-is-streaming','disabled','data-message-id','data-testid']
   });
   document.addEventListener('visibilitychange', schedule);
   window.addEventListener('pageshow', schedule);
+  window.addEventListener('popstate', schedule);
+  window.addEventListener('hashchange', schedule);
   schedule();
   window.setInterval(() => {
-    if (dirty || document.visibilityState === 'visible') {
+    if (document.visibilityState !== 'prerender') {
       const snapshot = buildSnapshot();
-      if (!snapshot.generating && snapshot.stable) {
-        dirty = true;
-        void publish();
-      }
+      const signature = JSON.stringify({
+        url: snapshot.url, messages: snapshot.messages, generating: snapshot.generating,
+        stable: snapshot.stable, composerReady: snapshot.composerReady,
+        loginRequired: snapshot.loginRequired, blockedReason: snapshot.blockedReason
+      });
+      if (signature !== lastPublishedSignature || Date.now() - lastPublishedAt >= 5000) schedule();
     }
-  }, 1500);
+  }, 1000);
 })();
