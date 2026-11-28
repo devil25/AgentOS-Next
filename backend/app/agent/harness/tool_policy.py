@@ -137,13 +137,15 @@ class ToolPolicy:
         # Observation and planning calls have no external side effects. They
         # may be repeated while waiting for fresh provider state; the Run-level
         # stuck-round guard still detects unproductive loops.
-        if tool_name in {
+        repeat_safe_names = {
             "embedded_browser_conversation",
             "embedded_browser_snapshot",
             "embedded_browser_read",
             "task_plan",
             "list_pages",
-        }:
+        }
+        leaf_name = tool_name.rsplit("__", 1)[-1]
+        if tool_name in repeat_safe_names or leaf_name in repeat_safe_names:
             return True
         metadata = (tool or {}).get("metadata", {}) or {}
         if bool(metadata.get("repeat_safe")):
