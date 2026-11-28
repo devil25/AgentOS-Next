@@ -108,7 +108,7 @@ class ToolPolicy:
         )
 
     def note_successful_page_action(self, tool_name: str) -> None:
-        """Allow one fresh conversation read after the embedded page changes."""
+        """Reset accumulated conversation-read counts after a page mutation."""
         if tool_name in _EMBEDDED_BROWSER_PAGE_MUTATION_TOOLS:
             signature = tool_call_signature("embedded_browser_conversation", {})
             self._call_counts.pop(signature, None)

@@ -90,9 +90,9 @@ class WebChatSessionAdapter:
         # long time. No deadline is imposed unless a caller explicitly opts in;
         # asyncio cancellation and the Run's stop/pause controls remain active.
         self.timeout = None if timeout is None else max(0.1, float(timeout))
-        # The embedded browser conversation tool performs its own bounded wait and
-        # stability confirmation. Re-reading it here would dispatch identical
-        # no-argument transport calls and trip the duplicate-call guard.
+        # The companion publishes stable/completed state with each observation.
+        # One stable sample is enough for that transport; the Run progress monitor
+        # handles unchanged observations without imposing a response deadline.
         self.stable_polls = 1 if getattr(browser, "provides_stable_snapshots", False) else max(1, stable_polls)
         self.empty_generation_grace = (
             None if empty_generation_grace is None else max(0.1, float(empty_generation_grace))
