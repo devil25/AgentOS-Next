@@ -699,7 +699,7 @@ const EMBEDDED_BROWSER_INTERACTION_SCRIPT = `(action, args) => {
       throw new Error('The selected text field could not receive focus')
     }
     // Actual text insertion is performed by Electron's native WebContents input API.
-    return { ok: true, action, index: elements.indexOf(element), characters: value.length }
+    return { ok: true, action, characters: value.length }
   }
   const selector = 'button,a[href],input:not([type="password"]):not([type="hidden"]):not([type="file"]),textarea,[contenteditable="true"],[role="button"],[role="textbox"]'
   const elements = Array.from(document.querySelectorAll(selector)).filter(visible).slice(0, 200)
