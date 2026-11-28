@@ -543,7 +543,7 @@ async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_afte
     assert response.finish_reason == "tool_calls"
     assert response.tool_calls
     assert response.tool_calls[0].name == "exec"
-    assert response.tool_calls[0].arguments["command"] == "Write-Output 'continue from the recorded plan'
+    assert response.tool_calls[0].arguments["command"] == "Write-Output 'continue from the recorded plan'"
     assert "Task plan created" in adapter.prompts[0][1]
     assert "TASK_PROTOCOL" in adapter.prompts[0][1]
     assert '"name":"exec"' in adapter.prompts[0][1]
