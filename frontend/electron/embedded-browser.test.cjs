@@ -174,6 +174,9 @@ test('embedded browser type resolves a fresh unique composer instead of trusting
   assert.match(script, /const index = Number\(args\.index\)/)
   assert.ok(script.indexOf("if (action === 'type')") < script.indexOf('const index = Number(args.index)'))
   assert.ok(script.indexOf("if (action === 'type')") < script.indexOf("const selector = 'button,a[href]"), 'text entry must not scan the full interactive element inventory first')
+  const typeStart = script.indexOf("if (action === 'type')")
+  const typeEnd = script.indexOf("const selector = 'button,a[href]")
+  assert.doesNotMatch(script.slice(typeStart, typeEnd), /elements\.indexOf/)
 })
 
 test('embedded browser text entry and Enter use native Electron input events', () => {
