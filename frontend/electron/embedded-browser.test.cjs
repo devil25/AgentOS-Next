@@ -315,7 +315,7 @@ test('companion service worker and provider observer are valid JavaScript', () =
   assert.match(content, /sequence = 0/)
   assert.match(content, /assistant_streaming/)
   assert.match(content, /assistant_completed/)
-  assert.match(content, /complete: false/)
+  assert.match(content, /\.complete = false/)
   assert.match(worker, /\/v1\/companion\/event/)
   assert.doesNotMatch(worker + content, /chrome\.cookies|document\.cookie|input\[type=["']password["']\]\.value/)
 })
