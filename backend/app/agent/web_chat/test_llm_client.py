@@ -490,7 +490,7 @@ async def test_web_chat_client_allows_a_fresh_read_only_observation_after_captur
     second = await client.chat_with_tools(messages=[user, result_one], tools=tools)
     assert second.finish_reason == "tool_calls"
     assert second.tool_calls
-    assert second.tool_calls[0].name == "embedded_browser_conversation"
+    assert second.tool_calls[0].tool_name == "embedded_browser_conversation"
     assert len(adapter.prompts) == 2
 
 @pytest.mark.anyio
@@ -542,7 +542,7 @@ async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_afte
     )
     assert response.finish_reason == "tool_calls"
     assert response.tool_calls
-    assert response.tool_calls[0].name == "exec"
+    assert response.tool_calls[0].tool_name == "exec"
     assert response.tool_calls[0].arguments["command"] == "Write-Output 'continue from the recorded plan'"
     assert "Task plan created" in adapter.prompts[0][1]
     assert "TASK_PROTOCOL" in adapter.prompts[0][1]
