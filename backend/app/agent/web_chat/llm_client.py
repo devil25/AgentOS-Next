@@ -224,6 +224,7 @@ class WebChatLLMClient:
                     and item is not conversation_result
                 ][-4:]
                 progress_text = "\n\n".join(progress_items)
+                catalog_json = json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
                 prompt = (
                     "AgentOS has already captured the active embedded conversation. Treat this "
                     "capture as durable evidence even if later task-plan/progress tool results appear "
@@ -233,7 +234,9 @@ class WebChatLLMClient:
                     "If the capture has no assistant text or pageText, state that limitation and "
                     "continue only with actions supported by the available evidence.\n\n"
                     "Original AgentOS request:\n" + goal[:6000] + "\n\n"
-                    "Bounded browser evidence:\n" + evidence_text[:18000]
+                    "AgentOS runtime policy and durable task protocol:\n" + system_prompt[:12000]
+                    + "\n\nAvailable AgentOS tools and authoritative argument schemas:\n" + catalog_json
+                    + "\n\nBounded browser evidence:\n" + evidence_text[:18000]
                     + ("\n\nLatest AgentOS progress result:\n" + progress_text[:6000] if progress_text else "")
                 )
             elif latest_result is not None:
