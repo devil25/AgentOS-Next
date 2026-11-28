@@ -7,6 +7,7 @@ import type {
   UploadedAttachment,
   TurnStartedEvent,
   SteeringAppliedEvent,
+  TaskProgressEvent,
   WebChatTarget,
 } from './types'
 
@@ -45,6 +46,7 @@ interface ChatStreamHandlers {
   onStepComplete?: (data: StepEvent) => void
   onObservation?: (data: StepEvent) => void
   onRetry?: (data: StepEvent) => void
+  onTaskProgress?: (data: TaskProgressEvent) => void
 }
 
 interface DoneEvent {
@@ -140,6 +142,9 @@ function dispatchSseEvent(
     } else if (eventType === 'plan') {
       bumpEvt(state, 'plan')
       handlers.onPlan?.(json)
+    } else if (eventType === 'task_progress') {
+      bumpEvt(state, 'task_progress')
+      handlers.onTaskProgress?.(json)
     } else if (eventType === 'step_start') {
       bumpEvt(state, 'step_start')
       handlers.onStepStart?.(json)
@@ -251,6 +256,7 @@ export function chatStream(
   // Follow this already-running turn (replayed from its start) instead of starting one.
   followRunId?: string,
   webChatTarget?: WebChatTarget,
+  onTaskProgress?: (data: TaskProgressEvent) => void,
 ): () => void {
   const controller = new AbortController()
 
@@ -284,6 +290,7 @@ export function chatStream(
       onStepComplete,
       onObservation,
       onRetry,
+      onTaskProgress,
     }
 
     try {
