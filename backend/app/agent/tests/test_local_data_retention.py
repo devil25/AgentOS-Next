@@ -205,9 +205,13 @@ def test_delete_preserves_snapshot_for_recoverable_or_needs_review_run(tmp_path,
 
     monkeypatch.setattr(conversation_routes, "peek_memory_manager", lambda: None)
     monkeypatch.setattr(conversation_routes, "delete_conversation_file", lambda value: db.delete_conversation(value))
-    with pytest.raises(HTTPException) as response:
-        asyncio.run(conversations.delete_conversation("review-chat"))
-    assert response.value.status_code == 409
+    archived = asyncio.run(conversations.delete_conversation("review-chat"))
+    assert archived == {"ok": True, "archived": True, "retained_run_history": True}
+    assert db.get_conversation("review-chat")["deleted_at"]
+    assert db.list_conversations() == []
+    assert [row["id"] for row in db.list_deleted_conversations()] == ["review-chat"]
+    assert db.fetchone("SELECT status FROM run_operations WHERE run_id = 'review-run'")[0] == "needs_review"
+    assert snapshot_path.exists()
     db.close()
 
 

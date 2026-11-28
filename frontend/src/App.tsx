@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar'
 import { ChatWindow } from './components/ChatWindow'
 import { InputBar } from './components/InputBar'
 import { ApprovalToast } from './components/ApprovalToast'
+import { EmbeddedBrowserPanel } from './components/EmbeddedBrowserPanel'
 import { AccessGrantCard } from './components/AccessGrantCard'
 import { ExecutionTimeline } from './components/ExecutionTimeline'
 import { RecoveryPanel } from './components/RecoveryPanel'
@@ -105,6 +106,8 @@ export default function App() {
   const [savingWorkspace, setSavingWorkspace] = useState(false)
   const workspaceGenerationRef = useRef(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [showEmbeddedBrowser, setShowEmbeddedBrowser] = useState(false)
+  const [embeddedBrowserProvider, setEmbeddedBrowserProvider] = useState<'chatgpt' | 'gemini' | 'deepseek' | 'zai'>('chatgpt')
   const [settingsPage, setSettingsPage] = useState<SettingsPageId | undefined>(undefined)
   const [conversationsLoaded, setConversationsLoaded] = useState(false)
   const [guideDismissed, setGuideDismissed] = useState(readGuideDismissed)
@@ -506,8 +509,15 @@ export default function App() {
     }
   }
 
-  const handleSend = (text: string, attachments: UploadedAttachment[] = [], webChatTarget?: WebChatTarget) => {
+  const handleSend = async (text: string, attachments: UploadedAttachment[] = [], webChatTarget?: WebChatTarget) => {
     if (savingWorkspace) return
+    if (webChatTarget) {
+      // Select the provider for the next explicit browser/login action, but never
+      // open or foreground the browser as a side effect of sending a chat message.
+      // The already-authenticated persistent WebContents session is used by the
+      // backend bridge while the user stays in the AgentOS conversation UI.
+      setEmbeddedBrowserProvider(webChatTarget.provider)
+    }
     const generation = workspaceGenerationRef.current
     const onConversationCreated = (newConvId: string) => {
       if (generation !== workspaceGenerationRef.current) return
@@ -680,7 +690,8 @@ export default function App() {
                   </details>
                 )
               })()}
-        />}
+          />}
+        onOpenBrowser={() => setShowEmbeddedBrowser(true)}
       />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
@@ -698,6 +709,7 @@ export default function App() {
           onRefreshConversation={(id) => {
             if (id === activeConvId) handleRefreshChat()
           }}
+          onRefreshConversations={() => { void loadConversations() }}
           onOpenSettings={() => openSettings()}
           scheduledTasks={scheduledTasks}
           actionFeedback={actionFeedback}
@@ -803,6 +815,8 @@ export default function App() {
           </main>
         </div>
       </div>
+
+      {showEmbeddedBrowser && <EmbeddedBrowserPanel initialProvider={embeddedBrowserProvider} onClose={() => setShowEmbeddedBrowser(false)} />}
 
       <ApprovalToast
         conversationId={activeConvId}

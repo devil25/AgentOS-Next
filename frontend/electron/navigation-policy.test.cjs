@@ -26,7 +26,7 @@ test('window.open sends only web links to the system browser', () => {
 })
 
 test('main window open handler always denies new windows', () => {
-  const handler = mainSource.match(/setWindowOpenHandler\(\(\{ url \}\) => \{[\s\S]*?\n  \}\)/)
+  const handler = mainSource.match(/mainWindow\.webContents\.setWindowOpenHandler\(\(\{ url \}\) => \{[\s\S]*?\n  \}\)/)
   assert.ok(handler, 'setWindowOpenHandler block not found')
   assert.match(handler[0], /windowOpenTarget\(/)
   assert.doesNotMatch(handler[0], /action:\s*'allow'/)

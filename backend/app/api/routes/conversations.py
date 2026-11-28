@@ -261,6 +261,29 @@ async def list_conversations(
     ]
 
 
+@router.get("/conversations/trash", response_model=list[ConversationOut])
+async def list_deleted_conversations(
+    limit: int = Query(100, ge=1, le=CONVERSATION_LIST_LIMIT_MAX),
+    offset: int = Query(0, ge=0),
+    search: str = Query("", max_length=200),
+    before_updated_at: str = Query("", max_length=80),
+    before_id: str = Query("", max_length=120),
+):
+    from app.agent.steering import conversation_is_running
+    from app.agent.turn_loop import conversation_turn_running
+
+    if bool(before_updated_at) != bool(before_id):
+        raise HTTPException(status_code=400, detail="Both conversation cursor fields are required.")
+    conversations = get_db().list_deleted_conversations(
+        limit=limit, offset=offset, search=search,
+        before_updated_at=before_updated_at, before_id=before_id,
+    )
+    return [
+        {**conversation, "running": conversation_is_running(conversation["id"]) or conversation_turn_running(conversation["id"])}
+        for conversation in conversations
+    ]
+
+
 @router.post("/conversations/workspace-validation", response_model=ConversationWorkspace)
 async def validate_conversation_workspace(body: ConversationWorkspace):
     try:
@@ -389,8 +412,27 @@ async def rename_conversation(conv_id: str, body: ConversationRename):
     return conv
 
 
-@router.delete("/conversations/{conv_id}", response_model=OkResponse)
-async def delete_conversation(conv_id: str):
+@router.post("/conversations/{conv_id}/restore", response_model=ConversationOut)
+async def restore_deleted_conversation(conv_id: str):
+    db = get_db()
+    if not db.restore_conversation(conv_id):
+        raise HTTPException(status_code=404, detail="Trashed conversation not found")
+    conversation = db.get_conversation(conv_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    publish_ui_event("conversation.changed", {"conversation_id": conv_id, "action": "restored"})
+    return conversation
+
+
+@router.delete("/conversations/{conv_id}/permanent", response_model=OkResponse)
+async def permanently_delete_trashed_conversation(conv_id: str):
+    """Permanently remove a trashed chat only after its Run evidence is safe to discard."""
+    db = get_db()
+    conversation = db.get_conversation(conv_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not conversation.get("deleted_at"):
+        raise HTTPException(status_code=409, detail="Move the conversation to Trash before permanently deleting it.")
     memory_manager = peek_memory_manager()
     try:
         found = memory_manager.delete(conv_id) if memory_manager is not None else delete_conversation_file(conv_id)
@@ -398,8 +440,29 @@ async def delete_conversation(conv_id: str):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not found:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    publish_ui_event("conversation.changed", {"conversation_id": conv_id, "action": "deleted"})
+    publish_ui_event("conversation.changed", {"conversation_id": conv_id, "action": "permanently_deleted"})
     return {"ok": True}
+
+
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: str):
+    db = get_db()
+    memory_manager = peek_memory_manager()
+    try:
+        found = memory_manager.delete(conv_id) if memory_manager is not None else delete_conversation_file(conv_id)
+    except ConversationHasUnresolvedRunError:
+        conversation = db.get_conversation(conv_id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        archived = db.soft_delete_conversation(conv_id)
+        if not archived and not conversation.get("deleted_at"):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        publish_ui_event("conversation.changed", {"conversation_id": conv_id, "action": "moved_to_trash"})
+        return {"ok": True, "archived": True, "retained_run_history": True}
+    if not found:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    publish_ui_event("conversation.changed", {"conversation_id": conv_id, "action": "deleted"})
+    return {"ok": True, "archived": False, "retained_run_history": False}
 
 
 @router.get("/conversations/{conv_id}/messages", response_model=MessagesResponse)

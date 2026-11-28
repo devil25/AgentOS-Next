@@ -1,10 +1,17 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ConversationHistoryDialog } from './ConversationHistoryDialog'
-import { fetchConversations } from '../lib/api/conversations'
+import {
+  fetchConversations, fetchDeletedConversations, permanentlyDeleteConversation, restoreConversation,
+} from '../lib/api/conversations'
 import type { Conversation } from '../lib/api/types'
 
-vi.mock('../lib/api/conversations', () => ({ fetchConversations: vi.fn() }))
+vi.mock('../lib/api/conversations', () => ({
+  fetchConversations: vi.fn(),
+  fetchDeletedConversations: vi.fn(),
+  permanentlyDeleteConversation: vi.fn(),
+  restoreConversation: vi.fn(),
+}))
 
 afterEach(() => {
   cleanup()
@@ -59,4 +66,82 @@ it('pages through old chats and searches the full history before reopening a res
   fireEvent.click(await screen.findByRole('button', { name: /Archived plan/ }))
   expect(onSelect).toHaveBeenCalledWith(oldChat)
   expect(onClose).toHaveBeenCalledOnce()
+})
+
+
+it('lists protected conversations in Trash and restores them without opening the deleted chat', async () => {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: {
+      configurable: true,
+      value: function (this: HTMLDialogElement) { this.setAttribute('open', '') },
+    },
+    close: {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.removeAttribute('open')
+        this.dispatchEvent(new Event('close'))
+      },
+    },
+  })
+  const trashed = {
+    id: 'protected-chat',
+    title: 'Protected run',
+    created_at: '2026-11-28T00:00:00Z',
+    updated_at: '2026-11-28T00:10:00Z',
+    running: false,
+  } as Conversation
+  vi.mocked(fetchConversations).mockResolvedValueOnce([])
+  vi.mocked(fetchDeletedConversations).mockResolvedValueOnce([trashed])
+  vi.mocked(restoreConversation).mockResolvedValueOnce(trashed)
+  const onSelect = vi.fn()
+  const onRefresh = vi.fn()
+  render(<ConversationHistoryDialog onSelect={onSelect} onClose={vi.fn()} onRefresh={onRefresh} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Trash' }))
+  expect(await screen.findByText('Protected run')).toBeInTheDocument()
+  expect(fetchDeletedConversations).toHaveBeenCalledWith(51, 0, expect.objectContaining({ search: '' }))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Restore Protected run' }))
+  await waitFor(() => expect(restoreConversation).toHaveBeenCalledWith('protected-chat'))
+  expect(onRefresh).toHaveBeenCalledOnce()
+  expect(onSelect).not.toHaveBeenCalled()
+  await waitFor(() => expect(screen.queryByText('Protected run')).not.toBeInTheDocument())
+})
+
+
+it('requires explicit confirmation and surfaces protected-run rejection for permanent deletion', async () => {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: {
+      configurable: true,
+      value: function (this: HTMLDialogElement) { this.setAttribute('open', '') },
+    },
+    close: {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.removeAttribute('open')
+        this.dispatchEvent(new Event('close'))
+      },
+    },
+  })
+  const trashed = {
+    id: 'uncertain-chat',
+    title: 'Uncertain run',
+    created_at: '2026-11-28T00:00:00Z',
+    updated_at: '2026-11-28T00:10:00Z',
+  } as Conversation
+  vi.mocked(fetchConversations).mockResolvedValueOnce([])
+  vi.mocked(fetchDeletedConversations).mockResolvedValueOnce([trashed])
+  vi.mocked(permanentlyDeleteConversation).mockRejectedValueOnce(new Error(
+    'Resolve or stop active and recoverable Runs before deleting this conversation.',
+  ))
+  render(<ConversationHistoryDialog onSelect={vi.fn()} onClose={vi.fn()} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Trash' }))
+  await screen.findByText('Uncertain run')
+  fireEvent.click(screen.getByRole('button', { name: 'Delete permanently Uncertain run' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm permanent delete Uncertain run' }))
+
+  await waitFor(() => expect(permanentlyDeleteConversation).toHaveBeenCalledWith('uncertain-chat'))
+  expect(await screen.findByRole('alert')).toHaveTextContent(/Resolve or stop active and recoverable Runs/)
+  expect(screen.getByText('Uncertain run')).toBeInTheDocument()
 })

@@ -235,6 +235,15 @@ class Journal:
                     raise IdempotencyConflictError("run_id was reused with different creation scope")
                 return self._run_dto(conn, existing)
 
+            # All creation paths (interactive, scheduled, jobs and API) must
+            # respect Trash. Existing Run IDs stay idempotently readable above
+            # so recovery/audit can still inspect runs created before deletion.
+            conversation = conn.execute(
+                "SELECT deleted_at FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+            if conversation is not None and conversation["deleted_at"] is not None:
+                raise InvalidTransitionError("cannot create a Run for a trashed conversation")
+
             if conn.execute(
                 "SELECT 1 FROM turn_checkpoints WHERE turn_id = ?", (turn_id,)
             ).fetchone() is not None:

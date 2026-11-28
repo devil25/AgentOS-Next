@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import os
 import re
 import ssl
 import urllib.error
@@ -544,3 +545,300 @@ def register_tools(registry, settings) -> None:
     from .registration import register_browser_tools
 
     register_browser_tools(registry, settings)
+
+
+async def _embedded_browser_request(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    port = os.environ.get("AGENTOS_EMBEDDED_BROWSER_PORT", "").strip()
+    secret = os.environ.get("AGENTOS_EMBEDDED_BROWSER_SECRET", "")
+    if not port.isdigit() or not secret:
+        raise RuntimeError("The AgentOS embedded browser bridge is not available.")
+
+    def _request() -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{int(port)}{path}",
+            data=json.dumps(payload or {}).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {secret}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                raw = response.read(512 * 1024)
+        except urllib.error.HTTPError as exc:
+            raw = exc.read(16 * 1024)
+            try:
+                detail = json.loads(raw.decode("utf-8", errors="replace"))
+            except (ValueError, TypeError):
+                detail = {}
+            message = str(detail.get("error") or exc.reason or "Embedded browser request failed")[:500]
+            raise RuntimeError(f"Embedded browser bridge HTTP {exc.code}: {message}") from exc
+        value = json.loads(raw.decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("Invalid embedded browser response")
+        if value.get("error"):
+            raise RuntimeError(str(value["error"])[:500])
+        return value
+
+    return await asyncio.to_thread(_request)
+
+
+async def embedded_browser_read(*, max_chars: int = 20000) -> str:
+    """Read visible text from the active AgentOS-Next embedded browser page."""
+    limit = max(500, min(int(max_chars or 20000), 20000))
+    try:
+        payload = await _embedded_browser_request("/v1/inspect")
+    except Exception:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_read_failed",
+            "error": "Could not read the active AgentOS embedded browser page.",
+        })
+    text_value = str(payload.get("text") or "")
+    return _json_output({
+        "ok": True,
+        "title": str(payload.get("title") or "")[:300],
+        "url": str(payload.get("url") or "")[:4096],
+        "headings": [str(item)[:300] for item in (payload.get("headings") or [])[:30]],
+        "text": text_value[:limit],
+        "truncated": len(text_value) > limit,
+        "inspected_at": str(payload.get("inspectedAt") or ""),
+    })
+
+
+async def embedded_browser_snapshot() -> str:
+    """List visible interactive elements in the active embedded page."""
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "snapshot"})
+    except Exception as exc:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_snapshot_failed",
+            "error": str(exc)[:500],
+        })
+    elements = payload.get("elements") if isinstance(payload.get("elements"), list) else []
+    return _json_output({
+        "ok": True,
+        "title": str(payload.get("title") or "")[:300],
+        "url": str(payload.get("url") or "")[:4096],
+        "elements": elements[:200],
+    })
+
+
+async def embedded_browser_click(*, index: int) -> str:
+    """Click one visible element identified by the latest embedded browser snapshot."""
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "click", "index": int(index)})
+        return _json_output({"ok": True, **payload})
+    except Exception as exc:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_action_failed",
+            "error": str(exc)[:500],
+        })
+
+
+async def embedded_browser_type(*, index: int, text: str, append: bool = False) -> str:
+    """Replace text in a visible, non-password editable field."""
+    value = str(text or "")
+    if len(value) > 4000:
+        return _json_output({"ok": False, "error": "Text is too long (maximum 4000 characters)."})
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "type", "index": int(index), "text": value, "append": bool(append)})
+        return _json_output({"ok": True, **payload})
+    except Exception as exc:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_type_failed",
+            "error": str(exc)[:500],
+        })
+
+
+async def embedded_browser_press_key(*, key: str) -> str:
+    """Press a small allow-listed key in the active embedded page."""
+    allowed = {"Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "Backspace"}
+    if key not in allowed:
+        return _json_output({"ok": False, "error": "Unsupported key."})
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "press_key", "key": key})
+        return _json_output({"ok": True, **payload})
+    except Exception as exc:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_key_failed",
+            "error": str(exc)[:500],
+        })
+
+
+async def embedded_browser_navigate(*, url: str) -> str:
+    """Navigate the active embedded browser to a user-supplied HTTPS URL."""
+    try:
+        payload = await _embedded_browser_request("/v1/action", {"action": "navigate", "url": str(url or "")})
+        return _json_output({"ok": True, **payload})
+    except Exception as exc:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_navigation_failed",
+            "error": str(exc)[:500],
+        })
+
+
+def _compact_embedded_conversation_messages(messages: list[Any]) -> tuple[list[dict[str, Any]], int, bool]:
+    """Return the latest user/assistant exchange instead of the entire chat history."""
+    normalized: list[tuple[int, dict[str, Any]]] = []
+    for index, item in enumerate(messages):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        message_id = str(item.get("message_id") or "")[:300]
+        message_text = str(item.get("text") or "")
+        if role in {"user", "assistant"} and message_id and message_text.strip():
+            normalized.append((index, {
+                "message_id": message_id,
+                "role": role,
+                "text": message_text,
+                "complete": bool(item.get("complete", True)),
+            }))
+
+    total_count = len(normalized)
+    if not normalized:
+        return [], 0, False
+
+    latest_assistant = next(
+        (position for position in range(len(normalized) - 1, -1, -1)
+         if normalized[position][1]["role"] == "assistant"),
+        None,
+    )
+    if latest_assistant is not None:
+        latest_user = next(
+            (position for position in range(latest_assistant - 1, -1, -1)
+             if normalized[position][1]["role"] == "user"),
+            None,
+        )
+        selected_positions = ([latest_user] if latest_user is not None else []) + [latest_assistant]
+    else:
+        selected_positions = list(range(max(0, len(normalized) - 3), len(normalized)))
+
+    safe_messages: list[dict[str, Any]] = []
+    truncated = len(selected_positions) < total_count
+    for position in selected_positions:
+        item = normalized[position][1]
+        is_latest_assistant = position == latest_assistant
+        limit = 16000 if is_latest_assistant else 1200
+        message_text = item["text"]
+        was_truncated = len(message_text) > limit
+        if was_truncated:
+            message_text = message_text[:limit] + "\n[Message truncated by AgentOS to keep the tool result bounded.]"
+            truncated = True
+        safe_messages.append({
+            "message_id": item["message_id"],
+            "role": item["role"],
+            "text": message_text,
+            "complete": item["complete"],
+        })
+    return safe_messages, total_count, truncated
+
+
+def _embedded_conversation_reply_ready(payload: dict[str, Any]) -> bool:
+    """A read after submission is ready only when the newest user turn has a reply."""
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    latest_user = -1
+    latest_assistant = -1
+    for index, item in enumerate(messages):
+        if not isinstance(item, dict) or not str(item.get("text") or "").strip():
+            continue
+        role = str(item.get("role") or "").lower()
+        if role == "user":
+            latest_user = index
+        elif role == "assistant":
+            latest_assistant = index
+    if bool(payload.get("generating")):
+        return False
+    if latest_user >= 0:
+        if latest_assistant <= latest_user:
+            return False
+        assistant = messages[latest_assistant]
+        return assistant.get("complete", True) is True
+    if latest_assistant >= 0:
+        return messages[latest_assistant].get("complete", True) is True
+    return bool(str(payload.get("pageText") or "").strip())
+
+
+async def embedded_browser_conversation() -> str:
+    """Wait for and return the latest completed exchange from the active embedded chat.
+
+    A just-submitted user message can appear before its assistant response. Poll
+    briefly inside this single tool call so the agent does not have to issue
+    repeated identical conversation reads while the provider is generating.
+    """
+    try:
+        payload: dict[str, Any] = {}
+        deadline = asyncio.get_running_loop().time() + 30.0
+        last_ready_signature = ""
+        stable_ready_polls = 0
+        while True:
+            payload = await _embedded_browser_request("/v1/conversation")
+            if _embedded_conversation_reply_ready(payload):
+                messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+                latest_assistant = next(
+                    (item for item in reversed(messages)
+                     if isinstance(item, dict) and str(item.get("role") or "").lower() == "assistant"
+                     and str(item.get("text") or "").strip()),
+                    None,
+                )
+                signature_source = latest_assistant or {"pageText": str(payload.get("pageText") or "")}
+                signature = json.dumps(signature_source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                if signature == last_ready_signature:
+                    stable_ready_polls += 1
+                else:
+                    last_ready_signature = signature
+                    stable_ready_polls = 1
+                # Confirm the same completed assistant content across three
+                # samples inside this one tool invocation. The outer adapter
+                # must not issue repeated identical no-argument reads.
+                if stable_ready_polls >= 3:
+                    break
+            else:
+                last_ready_signature = ""
+                stable_ready_polls = 0
+            if bool(payload.get("loginRequired")) or str(payload.get("blockedReason") or "").strip():
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                break
+            await asyncio.sleep(0.75)
+
+        messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+        safe_messages, total_message_count, capture_truncated = _compact_embedded_conversation_messages(messages)
+        # The page-text fallback is useful only when semantic assistant extraction
+        # failed. Do not duplicate a long captured assistant answer in pageText.
+        has_assistant = any(item["role"] == "assistant" for item in safe_messages)
+        page_text = "" if has_assistant else str(payload.get("pageText") or "")[:6000]
+        if len(str(payload.get("pageText") or "")) > 6000:
+            capture_truncated = True
+        ready = _embedded_conversation_reply_ready(payload)
+        result = {
+            "ok": ready,
+            "provider": str(payload.get("provider") or "")[:30],
+            "title": str(payload.get("title") or "")[:300],
+            "url": str(payload.get("url") or "")[:4096],
+            "messages": safe_messages,
+            "messageCount": len(safe_messages),
+            "totalMessageCount": total_message_count,
+            "captureTruncated": capture_truncated,
+            "captureSource": str(payload.get("captureSource") or "unknown")[:40],
+            "accessibilityNodeCount": max(0, int(payload.get("accessibilityNodeCount") or 0)),
+            "pageText": page_text,
+            "contextLimit": bool(payload.get("contextLimit")),
+            "composerReady": bool(payload.get("composerReady")),
+            "generating": bool(payload.get("generating")),
+            "loginRequired": bool(payload.get("loginRequired")),
+            "blockedReason": str(payload.get("blockedReason") or "")[:300],
+        }
+        if not ready:
+            result.update({
+                "status": "error",
+                "reason_code": "assistant_response_not_ready",
+                "error": "The latest provider turn did not expose a completed assistant reply within the bounded wait. Do not repeat this read unchanged; report the capture limitation.",
+            })
+        return _json_output(result)
+    except Exception as exc:
+        return _json_output({
+            "ok": False, "status": "error", "reason_code": "embedded_browser_conversation_failed",
+            "error": str(exc)[:500],
+        })

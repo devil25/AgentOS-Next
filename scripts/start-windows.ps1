@@ -21,9 +21,38 @@ $launcherLogDir = Join-Path $runtimeDir 'launcher'
 
 New-Item -ItemType Directory -Force -Path $launcherLogDir | Out-Null
 
+# PowerShell already inherits the effective Machine/User PATH. Preserve the
+# current process ordering, append only missing entries, and cap the value.
 $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$env:Path = @($machinePath, $userPath, $env:Path) -join ';'
+$pathEntries = [System.Collections.Generic.List[string]]::new()
+$seenPathEntries = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$pathLength = 0
+$maxPathLength = 32767
+
+foreach ($pathSource in @($env:Path, $machinePath, $userPath)) {
+  foreach ($entry in ([string]$pathSource -split ';')) {
+    $candidate = $entry.Trim()
+    if (-not $candidate) { continue }
+    $candidate = $candidate.TrimEnd([char]'/', [char]92)
+    if (-not $seenPathEntries.Add($candidate)) { continue }
+
+    $additionalLength = $candidate.Length
+    if ($pathEntries.Count -gt 0) { $additionalLength++ }
+    if (($pathLength + $additionalLength) -gt $maxPathLength) {
+      Write-Warning "Skipped PATH entry beyond Windows environment-variable limit: $candidate"
+      continue
+    }
+
+    $pathEntries.Add($candidate)
+    $pathLength += $additionalLength
+  }
+}
+
+$mergedPath = $pathEntries -join ';'
+if ($env:Path -ne $mergedPath) {
+  $env:Path = $mergedPath
+}
 
 $null = Assert-MonawNodeRuntime
 

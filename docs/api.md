@@ -29,11 +29,14 @@ unauthenticated runtime endpoint.
 | `POST` | `/api/chat/stop` | `agent:run` | `OkResponse` |
 | `GET` | `/api/conversations` | `agent:run` | `list` |
 | `POST` | `/api/conversations` | `agent:run` | `ConversationOut` |
+| `GET` | `/api/conversations/trash` | `agent:run` | `list` |
 | `POST` | `/api/conversations/workspace-validation` | `agent:run` | `ConversationWorkspace` |
-| `DELETE` | `/api/conversations/{conv_id}` | `agent:run` | `OkResponse` |
+| `DELETE` | `/api/conversations/{conv_id}` | `agent:run` | `stream/file/none` |
 | `PATCH` | `/api/conversations/{conv_id}` | `agent:run` | `ConversationOut` |
 | `GET` | `/api/conversations/{conv_id}/context-usage` | `agent:run` | `ContextUsagePayload` |
 | `GET` | `/api/conversations/{conv_id}/messages` | `agent:run` | `MessagesResponse` |
+| `DELETE` | `/api/conversations/{conv_id}/permanent` | `agent:run` | `OkResponse` |
+| `POST` | `/api/conversations/{conv_id}/restore` | `agent:run` | `ConversationOut` |
 | `GET` | `/api/diagnostics/browser-use` | `diagnostics:read` | `BrowserUseDiagnosticsOut` |
 | `POST` | `/api/diagnostics/browser-use/extension/install` | `diagnostics:control` | `BrowserExtensionInstallOut` |
 | `POST` | `/api/diagnostics/browser-use/reset` | `diagnostics:control` | `BrowserUseDiagnosticsOut` |
@@ -128,7 +131,7 @@ Run routes apply to desktop Runs owned by the signed Monaw profile. Each request
 
 Recovery verifies persisted state before offering Continue. It does not replay an interrupted tool call. Supported native file effects can be checked against private snapshots; Shell, Browser, MCP, and other opaque effects can remain `needs_review` until the user inspects them. A `verify` request is read-only. Run events and operation evidence are projected onto bounded public fields; file paths, file contents, snapshot references, and raw content hashes are not returned.
 
-Run events are stored in `agent.db` and currently have no automatic age-based retention. The `410 events_expired` response means the requested sequence has a gap in the rows that remain; it is not evidence of a configured retention period. Deleting a conversation cascades its Run, operation, and event rows, while old unreferenced snapshot files are reclaimed separately by snapshot cleanup.
+Run events are stored in `agent.db` and currently have no automatic age-based retention. The `410 events_expired` response means the requested sequence has a gap in the rows that remain; it is not evidence of a configured retention period. Deleting a conversation with active or unresolved Run evidence moves it to Trash without removing Run, operation, event, or snapshot evidence. Restore returns it to normal history. Permanent deletion is a separate action and remains blocked until active and unresolved Runs have been safely resolved; unreferenced snapshot files are reclaimed separately by snapshot cleanup.
 
 ## File-mutation routes
 

@@ -83,6 +83,10 @@
       {
         "from": "../browser-extension",
         "to": "browser-extension"
+      },
+      {
+        "from": "../browser-companion",
+        "to": "browser-companion"
       }
     ],
     "extraFiles": [

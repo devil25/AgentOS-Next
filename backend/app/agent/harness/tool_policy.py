@@ -51,6 +51,13 @@ _MEDIUM_RISK_TOOLS = {
     "append_file",
 }
 
+_EMBEDDED_BROWSER_PAGE_MUTATION_TOOLS = {
+    "embedded_browser_click",
+    "embedded_browser_type",
+    "embedded_browser_press_key",
+    "embedded_browser_navigate",
+}
+
 
 class ToolPolicy:
     def __init__(self, *, max_identical_calls: int = 2) -> None:
@@ -100,6 +107,12 @@ class ToolPolicy:
             metadata={"signature": signature, "repeat_count": repeat_count + 1},
         )
 
+    def note_successful_page_action(self, tool_name: str) -> None:
+        """Allow one fresh conversation read after the embedded page changes."""
+        if tool_name in _EMBEDDED_BROWSER_PAGE_MUTATION_TOOLS:
+            signature = tool_call_signature("embedded_browser_conversation", {})
+            self._call_counts.pop(signature, None)
+
     def classify_risk(self, tool_name: str, tool: dict | None = None) -> str:
         # Reflected provider metadata can raise the display risk, never lower
         # the local minimum for opaque execution capabilities. Authorization
@@ -121,6 +134,10 @@ class ToolPolicy:
 
     @staticmethod
     def _is_repeat_safe(tool_name: str, arguments: dict, tool: dict | None = None) -> bool:
+        # A conversation read is safe but not useful to repeat unchanged. Keep
+        # it under the ordinary identical-call budget to prevent endless polling.
+        if tool_name == "embedded_browser_conversation":
+            return False
         metadata = (tool or {}).get("metadata", {}) or {}
         if bool(metadata.get("repeat_safe")):
             return True

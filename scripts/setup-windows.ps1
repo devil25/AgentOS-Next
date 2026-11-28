@@ -40,9 +40,30 @@ function Write-Step {
 }
 
 function Update-ProcessPath {
+  # Merge PATH sources without repeatedly appending the current PATH to itself.
+  # npm lifecycle scripts run through cmd.exe, so preserve the standard Windows
+  # command directories as well as the Node.js installation directory.
   $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
   $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-  $env:Path = @($machinePath, $userPath, $env:Path) -join ';'
+  $candidates = @(
+    "$env:SystemRoot\System32",
+    "$env:SystemRoot",
+    "$env:SystemRoot\System32\Wbem",
+    $machinePath,
+    $userPath,
+    $env:Path
+  )
+
+  $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $entries = [System.Collections.Generic.List[string]]::new()
+  foreach ($candidate in $candidates) {
+    foreach ($entry in ([string]$candidate -split ';')) {
+      $normalized = [Environment]::ExpandEnvironmentVariables($entry.Trim().Trim('"'))
+      if ([string]::IsNullOrWhiteSpace($normalized)) { continue }
+      if ($seen.Add($normalized)) { [void]$entries.Add($normalized) }
+    }
+  }
+  $env:Path = $entries -join ';'
 }
 
 function Invoke-LoggedCommand {

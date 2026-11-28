@@ -104,17 +104,17 @@ def build_web_chat_reasoning_client(
     provider: str, page_id: int | None, *, run_id: str = "", conversation_url: str = "",
 ):
     from app.agent.web_chat.adapter import WebChatSessionAdapter
-    from app.agent.web_chat.chrome_port import ChromeWebChatBrowserPort
+    from app.agent.web_chat.embedded_port import EmbeddedWebChatBrowserPort
     from app.agent.web_chat.llm_client import WebChatLLMClient
 
     if provider not in SUPPORTED_WEB_CHAT_PROVIDERS:
         raise ValueError("Unsupported web-chat provider.")
     if page_id is not None and (isinstance(page_id, bool) or not isinstance(page_id, int) or page_id < 1):
         raise ValueError("A valid Chrome DevTools page ID is required.")
-    browser_port = ChromeWebChatBrowserPort(provider=provider)
+    browser_port = EmbeddedWebChatBrowserPort(provider=provider)
 
     def persist_conversation_url(url: str) -> None:
-        resolved_page_id = page_id or browser_port.resolved_page_id
+        resolved_page_id = browser_port.resolved_page_id or page_id
         if run_id and resolved_page_id is not None:
             save_web_chat_run_context(
                 run_id, provider, resolved_page_id, conversation_url=url,

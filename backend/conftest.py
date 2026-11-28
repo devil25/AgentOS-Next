@@ -86,6 +86,7 @@ TEST_GROUPS = {
         "test_computer_state.py",
         "test_computer_input.py",
         "test_browser_fetch.py",
+        "test_embedded_browser_read.py",
         "test_browser_extension_bridge.py",
         "test_browser_extension_install.py",
         "test_browser_extension_tools.py",
@@ -121,6 +122,7 @@ TEST_GROUPS = {
     },
     "integrations": {
         "test_adapter.py",
+        "test_embedded_port.py",
         "test_chrome_port.py",
         "test_coordinator.py",
         "test_llm_client.py",

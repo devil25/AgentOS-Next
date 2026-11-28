@@ -377,6 +377,8 @@ class ToolBatchRunner:
         )
         raw_tool_output, status, recovery_prompt = guarded.output, guarded.status, guarded.recovery_prompt
         self.pause = guarded.pause or self.pause
+        if status == "ok":
+            self.policy.note_successful_page_action(tool_name)
         self.ledger.record_output(prepared.active_key, raw_tool_output, status)
         active_call = self.ledger.get(prepared.active_key)
         image_attachments = extract_image_attachments(tool_name, raw_tool_output)
@@ -446,10 +448,10 @@ class ToolBatchRunner:
         if not internal_transport:
             self.transcript.add_tool_result(tool_result, images=image_attachments)
             if recovery_prompt:
-                self.transcript.append({"role": "user", "content": recovery_prompt})
+                self.transcript.append({"role": "user", "content": recovery_prompt, "agentos_internal_context": True})
             workflow_hint = self.browser_workflow.observe(tool_name, arguments, raw_tool_output, status)
             if workflow_hint and not recovery_prompt:
-                self.transcript.append({"role": "user", "content": workflow_hint})
+                self.transcript.append({"role": "user", "content": workflow_hint, "agentos_internal_context": True})
         return tool_result
 
 

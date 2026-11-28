@@ -15,6 +15,30 @@ class BrowserWorkflow:
         self._scripts = 0
 
     def observe(self, name: str, arguments: dict, output: str, status: str) -> str:
+        if name == "embedded_browser_conversation":
+            if status != "ok":
+                return self._priority_hint(
+                    "embedded_conversation_failed",
+                    "The embedded conversation read failed. Do not repeat the same read on an unchanged page; report the capture error or choose a different, justified recovery action.",
+                )
+            payload = parse_tool_json(output)
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            has_assistant = any(
+                isinstance(item, dict)
+                and item.get("role") == "assistant"
+                and str(item.get("text") or "").strip()
+                for item in messages
+            )
+            has_page_text = bool(str(payload.get("pageText") or "").strip())
+            if has_assistant or has_page_text:
+                return self._priority_hint(
+                    "embedded_conversation_read",
+                    "The latest embedded conversation exchange is already captured above. Use its latest assistant text/pageText as evidence and answer the user now. Do not call embedded_browser_conversation again unless a new browser action changed the page.",
+                )
+            return self._priority_hint(
+                "embedded_conversation_empty",
+                "The browser conversation read returned no assistant message or visible page text. Do not poll the unchanged page again; explain that capture was unavailable.",
+            )
         if not name.startswith(DEVTOOLS_PREFIX):
             # Another tool (including desktop or scripts) may change the page.
             self._last_snapshot = self._last_fill = None
@@ -59,6 +83,13 @@ class BrowserWorkflow:
         if self._scripts >= 2:
             hint = self._hint("scripts", "Before generating another page script, check whether inspect_element can answer the DOM question, wait_for can handle readiness, or fill_form can perform the field updates. Use evaluate_script when the dedicated tools cannot express the task.") or hint
         return hint
+
+    def _priority_hint(self, kind: str, text: str) -> str:
+        """Preserve critical result-consumption guidance even after ordinary hints."""
+        if kind in self._hinted:
+            return ""
+        self._hinted.add(kind)
+        return "Browser workflow guidance: " + text
 
     def _hint(self, kind: str, text: str) -> str:
         if kind in self._hinted or len(self._hinted) >= 4:

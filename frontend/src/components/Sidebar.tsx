@@ -20,6 +20,7 @@ interface Props {
   onDelete: (id: string) => void
   onRename?: (id: string, title: string) => void | Promise<boolean>
   onRefreshConversation?: (id: string) => void
+  onRefreshConversations?: () => void
   onOpenSettings: () => void
   scheduledTasks: ScheduledTask[]
   actionFeedback?: Record<string, ItemActionFeedback>
@@ -128,6 +129,7 @@ export function Sidebar({
   onDelete,
   onRename,
   onRefreshConversation,
+  onRefreshConversations,
   onOpenSettings,
   scheduledTasks,
   actionFeedback,
@@ -539,6 +541,7 @@ export function Sidebar({
       {historyOpen && (
         <ConversationHistoryDialog
           onClose={() => setHistoryOpen(false)}
+          onRefresh={onRefreshConversations}
           onSelect={(conversation) => {
             onDiscoverConversation?.(conversation)
             onSelect(conversation.id)

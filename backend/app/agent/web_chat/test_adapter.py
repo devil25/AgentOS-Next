@@ -23,11 +23,11 @@ class FakeBrowser:
 
 
 def snapshot(messages=(), *, url="https://chatgpt.com/", generating=False,
-             composer=True, login=False, blocked=""):
+             composer=True, login=False, blocked="", context_limit=False):
     return ConversationSnapshot(
         url=url, title="ChatGPT", messages=tuple(messages),
         composer_ready=composer, generating=generating,
-        login_required=login, blocked_reason=blocked,
+        login_required=login, blocked_reason=blocked, context_limit=context_limit,
     )
 
 
@@ -75,11 +75,83 @@ async def test_turn_does_not_return_partial_or_generating_response():
 
 
 @pytest.mark.anyio
+async def test_turn_stops_polling_when_provider_claims_generation_without_any_messages():
+    browser = FakeBrowser([
+        snapshot([], generating=True),
+        snapshot([], generating=True),
+        snapshot([], generating=True),
+        snapshot([], generating=True),
+    ])
+    adapter = WebChatSessionAdapter(
+        browser, poll_interval=0.1, timeout=5, empty_generation_grace=0.2,
+    )
+    with pytest.raises(WebChatAdapterError, match="no conversation messages"):
+        await adapter.send_and_wait(
+            tab_id=12, prompt="Do work", expected_provider="chatgpt",
+        )
+    assert browser.submitted == [(12, "Do work")]
+
+
+@pytest.mark.anyio
+async def test_turn_rolls_over_when_provider_exposes_an_explicit_context_limit_banner():
+    from app.agent.web_chat.adapter import WebChatContextLimitError
+
+    browser = FakeBrowser([snapshot([AssistantMessage("old", "Prior reply", True)], context_limit=True)])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+    with pytest.raises(WebChatContextLimitError, match="context limit"):
+        await adapter.send_and_wait(tab_id=12, prompt="Continue", expected_provider="chatgpt")
+    assert browser.submitted == []
+
+
+@pytest.mark.anyio
+async def test_turn_classifies_explicit_provider_context_limit_without_retrying():
+    from app.agent.web_chat.adapter import WebChatContextLimitError
+
+    old = AssistantMessage("old", "Earlier response", True)
+    limit = AssistantMessage("limit", "This conversation is too long. Start a new chat.", True)
+    browser = FakeBrowser([
+        snapshot([old]),
+        snapshot([old, limit]),
+        snapshot([old, limit]),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=2)
+    with pytest.raises(WebChatContextLimitError, match="context limit"):
+        await adapter.send_and_wait(tab_id=12, prompt="Continue", expected_provider="chatgpt")
+    assert browser.submitted == [(12, "Continue")]
+
+
+@pytest.mark.anyio
+async def test_turn_allows_chatgpt_home_url_to_become_new_conversation_after_submit():
+    new = AssistantMessage("new", "The requested response", True)
+    browser = FakeBrowser([
+        snapshot([], url="https://chatgpt.com/"),
+        snapshot([new], url="https://chatgpt.com/c/newly-created"),
+        snapshot([new], url="https://chatgpt.com/c/newly-created"),
+    ])
+    persisted = []
+    adapter = WebChatSessionAdapter(
+        browser, poll_interval=0.1, timeout=5, stable_polls=2,
+        on_conversation_url=persisted.append,
+    )
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Say hello", expected_provider="chatgpt",
+        expected_conversation_url="https://chatgpt.com/",
+    )
+    assert turn.assistant_message.text == "The requested response"
+    assert turn.conversation_url == "https://chatgpt.com/c/newly-created"
+    assert persisted == [
+        "https://chatgpt.com/",
+        "https://chatgpt.com/c/newly-created",
+    ]
+
+
+@pytest.mark.anyio
 async def test_turn_rejects_conversation_switch_after_submission():
     old = AssistantMessage("old", "Earlier response", True)
+    different = AssistantMessage("other-chat-message", "A different conversation", True)
     browser = FakeBrowser([
         snapshot([old], url="https://chatgpt.com/c/task-a"),
-        snapshot([old], url="https://chatgpt.com/c/task-b"),
+        snapshot([different], url="https://chatgpt.com/c/task-b"),
     ])
     adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
     with pytest.raises(WebChatAdapterError, match="conversation changed"):
@@ -108,11 +180,45 @@ async def test_turn_allows_provider_query_and_fragment_changes_for_same_conversa
 
 
 @pytest.mark.anyio
+async def test_turn_allows_chatgpt_legacy_and_canonical_hosts_for_same_conversation():
+    old = AssistantMessage("old", "Earlier response", True)
+    new = AssistantMessage("new", "Completed response", True)
+    browser = FakeBrowser([
+        snapshot([old], url="https://chat.openai.com/c/task-a"),
+        snapshot([old, new], url="https://chatgpt.com/c/task-a"),
+        snapshot([old, new], url="https://chatgpt.com/c/task-a"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=2)
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Continue", expected_provider="chatgpt",
+        expected_conversation_url="https://chat.openai.com/c/task-a",
+    )
+    assert turn.assistant_message.text == "Completed response"
+
+
+@pytest.mark.anyio
+async def test_turn_still_rejects_different_chatgpt_conversation_across_host_aliases():
+    old = AssistantMessage("old", "Earlier response", True)
+    different = AssistantMessage("new-document-node", "A different conversation", True)
+    browser = FakeBrowser([
+        snapshot([old], url="https://chat.openai.com/c/task-a"),
+        snapshot([different], url="https://chatgpt.com/c/task-b"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
+    with pytest.raises(WebChatAdapterError, match="conversation changed"):
+        await adapter.send_and_wait(
+            tab_id=12, prompt="Continue", expected_provider="chatgpt",
+            expected_conversation_url="https://chat.openai.com/c/task-a",
+        )
+
+
+@pytest.mark.anyio
 async def test_initial_turn_rejects_switch_from_existing_conversation():
     old = AssistantMessage("old", "Earlier response", True)
+    different = AssistantMessage("other-chat-message", "A different conversation", True)
     browser = FakeBrowser([
         snapshot([old], url="https://chatgpt.com/c/task-a"),
-        snapshot([old], url="https://chatgpt.com/c/task-b"),
+        snapshot([different], url="https://chatgpt.com/c/task-b"),
     ])
     adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5)
     with pytest.raises(WebChatAdapterError, match="conversation changed"):
@@ -160,3 +266,45 @@ async def test_turn_accepts_an_automatically_resolved_page_id():
     )
     assert turn.tab_id == 23
     assert browser.submitted == [(23, "Use the detected tab")]
+
+
+@pytest.mark.anyio
+async def test_turn_allows_same_accessibility_history_when_provider_spa_url_changes():
+    old = AssistantMessage("stable-backend-node-101", "Earlier response", True)
+    new = AssistantMessage("stable-backend-node-202", "New response", True)
+    browser = FakeBrowser([
+        snapshot([old], url="https://chatgpt.com/c/task-a"),
+        snapshot([old, new], url="https://chatgpt.com/"),
+        snapshot([old, new], url="https://chatgpt.com/"),
+    ])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=2)
+    turn = await adapter.send_and_wait(
+        tab_id=12, prompt="Continue", expected_provider="chatgpt",
+        expected_conversation_url="https://chatgpt.com/c/task-a",
+    )
+    assert turn.assistant_message.message_id == "stable-backend-node-202"
+
+
+@pytest.mark.anyio
+async def test_embedded_stable_snapshot_browser_uses_one_post_submit_read():
+    class StableSnapshotBrowser(FakeBrowser):
+        provides_stable_snapshots = True
+
+        def __init__(self, snapshots):
+            super().__init__(snapshots)
+            self.inspect_calls = 0
+
+        async def inspect(self, tab_id):
+            self.inspect_calls += 1
+            return await super().inspect(tab_id)
+
+    old = AssistantMessage("old", "Earlier response", True)
+    new = AssistantMessage("new", "A completed response", True)
+    browser = StableSnapshotBrowser([snapshot([old]), snapshot([old, new])])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=3)
+
+    turn = await adapter.send_and_wait(tab_id=12, prompt="Do work", expected_provider="chatgpt")
+
+    assert turn.assistant_message.message_id == "new"
+    assert browser.submitted == [(12, "Do work")]
+    assert browser.inspect_calls == 2

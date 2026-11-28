@@ -33,6 +33,34 @@ export async function deleteConversation(id: string): Promise<void> {
   if (!res.ok && res.status !== 404) return throwApiError(res, 'Failed to delete conversation')
 }
 
+
+export async function fetchDeletedConversations(
+  limit = 100,
+  offset = 0,
+  options: { search?: string; beforeUpdatedAt?: string; beforeId?: string; signal?: AbortSignal } = {},
+): Promise<Conversation[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (options.search) params.set('search', options.search)
+  if (options.beforeUpdatedAt && options.beforeId) {
+    params.set('before_updated_at', options.beforeUpdatedAt)
+    params.set('before_id', options.beforeId)
+  }
+  const res = await apiFetch(`${BASE}/api/conversations/trash?${params}`, { signal: options.signal })
+  if (!res.ok) return throwApiError(res, 'Failed to fetch Trash')
+  return res.json()
+}
+
+export async function restoreConversation(id: string): Promise<Conversation> {
+  const res = await apiFetch(`${BASE}/api/conversations/${encodeURIComponent(id)}/restore`, { method: 'POST' })
+  if (!res.ok) return throwApiError(res, 'Failed to restore conversation')
+  return res.json()
+}
+
+export async function permanentlyDeleteConversation(id: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/api/conversations/${encodeURIComponent(id)}/permanent`, { method: 'DELETE' })
+  if (!res.ok) return throwApiError(res, 'Cannot permanently delete this conversation while its Run history is protected')
+}
+
 export async function renameConversation(id: string, title: string): Promise<Conversation> {
   const res = await apiFetch(`${BASE}/api/conversations/${encodeURIComponent(id)}`, {
     method: 'PATCH',

@@ -71,6 +71,11 @@ def _prepare_conversation_workspace(req: ChatRequest, conv_id: str) -> None:
 
     db = get_db()
     existing = db.get_conversation(conv_id)
+    if existing is not None and existing.get("deleted_at"):
+        raise HTTPException(
+            status_code=409,
+            detail="This conversation is in Trash. Restore it before sending new messages.",
+        )
     workspace_dir = ""
     if req.workspace_dir is not None:
         from app.agent.conversation_workspace import validate_workspace_dir
@@ -240,6 +245,13 @@ async def steer_chat(body: ChatSteerRequest, request: Request):
     inbox = get_steering(body.run_id, session_id)
     if inbox is None:
         raise HTTPException(status_code=409, detail="This turn is no longer running. Send the message as a new turn.")
+    from app.agent.database import get_db
+    conversation = get_db().get_conversation(inbox.conversation_id)
+    if conversation is not None and conversation.get("deleted_at"):
+        raise HTTPException(
+            status_code=409,
+            detail="This conversation is in Trash. Restore it before sending steering messages.",
+        )
     req = ChatRequest(message=body.message, conversation_id=inbox.conversation_id, attachments=body.attachments)
     attachments = _runtime_attachments(req, control_session_id=session_id, conversation_id=inbox.conversation_id)
     try:

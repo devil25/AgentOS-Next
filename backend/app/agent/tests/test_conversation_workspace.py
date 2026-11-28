@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.agent import conversation_workspace as workspace
 from app.agent import database, memory_manager, workspace_instructions
 from app.agent.runtime import AgentRuntime
+from app.agent.durable import InvalidTransitionError, Journal
 from app.agent.steering import SteeringInbox, register_steering, unregister_steering
 from app.main import app
 from app.skills.exec import tools as exec_tools
@@ -324,3 +325,106 @@ def test_paths_expand_environment_variables_before_resolving_workspace(tmp_path,
         assert workspace.validate_workspace_dir("%MONAW_TEST_PROJECT%") == str(tmp_path.resolve())
     finally:
         workspace.reset_workspace_dir(token)
+
+
+def test_delete_with_unresolved_run_moves_conversation_to_trash_and_restores_it(db, monkeypatch):
+    """Trash hides a protected conversation without deleting its durable recovery evidence."""
+    db.create_conversation("trash-chat", "Protected chat", workspace_dir="C:/work")
+    journal = Journal(db)
+    created = journal.create_run(
+        run_id="trash-run",
+        conversation_id="trash-chat",
+        execution_source="desktop",
+        owner_instance_id="trash-owner",
+        turn_id="trash-turn",
+        workspace_dir="C:/work",
+    )
+    journal.prepare_operation(
+        created["run_id"],
+        operation_id="trash-uncertain-operation",
+        owner_instance_id="trash-owner",
+        attempt=int(created["attempt"]),
+        operation_kind="shell_command",
+        effect_class="opaque_effect",
+        tool_name="shell_command",
+    )
+    for status in ("authorized", "executing", "uncertain"):
+        journal.transition_operation(
+            created["run_id"],
+            "trash-uncertain-operation",
+            to_status=status,
+            owner_instance_id="trash-owner",
+            attempt=int(created["attempt"]),
+        )
+
+    import app.api.routes.conversations as conversation_routes
+    monkeypatch.setattr(conversation_routes, "peek_memory_manager", lambda: None)
+
+    client = TestClient(app)
+    deleted = client.delete("/api/conversations/trash-chat")
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json() == {"ok": True, "archived": True, "retained_run_history": True}
+
+    assert db.get_conversation("trash-chat")["deleted_at"]
+    assert db.list_conversations() == []
+    assert [row["id"] for row in db.list_deleted_conversations()] == ["trash-chat"]
+    trash_list = client.get("/api/conversations/trash")
+    assert trash_list.status_code == 200, trash_list.text
+    assert [row["id"] for row in trash_list.json()] == ["trash-chat"]
+    assert db.fetchone("SELECT status FROM run_operations WHERE operation_id = ?", (
+        "trash-uncertain-operation",
+    ))["status"] == "uncertain"
+    assert db.fetchone("SELECT run_id FROM agent_runs WHERE run_id = ?", ("trash-run",))["run_id"] == "trash-run"
+
+    # Permanent deletion remains blocked while the external effect is uncertain.
+    permanent = client.delete("/api/conversations/trash-chat/permanent")
+    assert permanent.status_code == 409
+    assert db.get_conversation("trash-chat")["deleted_at"]
+    assert db.fetchone("SELECT status FROM run_operations WHERE operation_id = ?", (
+        "trash-uncertain-operation",
+    ))["status"] == "uncertain"
+
+    # Direct Run creation paths (including scheduled work) must also respect Trash.
+    with pytest.raises(InvalidTransitionError, match="trashed conversation"):
+        journal.create_run(
+            run_id="trash-new-run",
+            conversation_id="trash-chat",
+            execution_source="scheduled",
+            owner_instance_id="trash-owner",
+            turn_id="trash-new-turn",
+            workspace_dir="C:/work",
+        )
+
+    blocked = client.post("/api/chat", json={
+        "message": "This must wait until the conversation is restored.",
+        "conversation_id": "trash-chat",
+    })
+    assert blocked.status_code == 409
+    assert "Restore it before sending" in blocked.json()["message"]
+
+    restored = client.post("/api/conversations/trash-chat/restore")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["id"] == "trash-chat"
+    assert restored.json().get("deleted_at") is None
+    assert [row["id"] for row in db.list_conversations()] == ["trash-chat"]
+    assert db.fetchone("SELECT status FROM run_operations WHERE operation_id = ?", (
+        "trash-uncertain-operation",
+    ))["status"] == "uncertain"
+
+    # Restoring the chat never silently resolves its unknown external effect.
+    with pytest.raises(database.ConversationHasUnresolvedRunError):
+        db.delete_conversation("trash-chat")
+
+
+def test_permanent_delete_from_trash_succeeds_only_for_a_safe_conversation(db, monkeypatch):
+    import app.api.routes.conversations as conversation_routes
+    monkeypatch.setattr(conversation_routes, "peek_memory_manager", lambda: None)
+
+    db.create_conversation("safe-trash-chat", "Safe trash chat", workspace_dir="C:/work")
+    assert db.soft_delete_conversation("safe-trash-chat") is True
+
+    response = TestClient(app).delete("/api/conversations/safe-trash-chat/permanent")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"ok": True}
+    assert db.get_conversation("safe-trash-chat") is None

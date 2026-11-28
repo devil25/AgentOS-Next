@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.web_chat.llm_client import WebChatLLMClient
+from app.agent.web_chat.adapter import WebChatContextLimitError
 from app.agent.harness.tool_runner import ToolBatchRunner
 from app.agent.harness.turn_transcript import TurnTranscript
 from app.agent.harness.tool_protocol import ToolCallResult
@@ -15,14 +16,24 @@ class FakeAdapter:
         self.replies = list(replies)
         self.prompts = []
         self.expected_urls = []
+        self.new_chat_calls = 0
 
     async def send_and_wait(self, *, tab_id, prompt, expected_provider, expected_conversation_url=""):
         self.prompts.append((tab_id, prompt, expected_provider))
         self.expected_urls.append(expected_conversation_url)
+        reply = self.replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        default_url = "https://chatgpt.com/c/task-123" if expected_provider == "chatgpt" else "https://chat.z.ai/c/task-123"
         return SimpleNamespace(
-            assistant_message=SimpleNamespace(text=self.replies.pop(0)),
-            conversation_url="https://chatgpt.com/c/task-123" if expected_provider == "chatgpt" else "https://chat.z.ai/c/task-123",
+            assistant_message=SimpleNamespace(text=reply),
+            conversation_url=expected_conversation_url or default_url,
+            tab_id=tab_id,
         )
+
+    async def start_new_conversation(self):
+        self.new_chat_calls += 1
+        return "https://chatgpt.com/c/fresh-task"
 
 
 def action():
@@ -58,6 +69,48 @@ async def test_web_chat_client_returns_tool_call_for_existing_turn_loop():
     assert response.tool_calls[0].arguments == {"command": "Get-Date"}
     assert "terminal.execute" in adapter.prompts[0][1]
     assert adapter.prompts[0][0] == 42
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_rolls_over_once_and_hands_off_goal_and_real_tool_results():
+    adapter = FakeAdapter([
+        WebChatContextLimitError("The provider explicitly reported its context limit."),
+        "The remaining task is complete.",
+    ])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    result_message = {
+        "role": "user", "content": "AgentOS tool result: created report.pdf",
+        "tool_result": True, "web_chat_action_result": True,
+    }
+    response = await client.chat_with_tools(
+        messages=[{"role": "user", "content": "Create a report and verify it"}, result_message],
+        tools=[],
+        system_prompt="Task progress: report creation verified; verification remains pending.",
+    )
+    assert response.content == "The remaining task is complete."
+    assert adapter.new_chat_calls == 1
+    assert len(adapter.prompts) == 2
+    handoff = adapter.prompts[1][1]
+    assert "Create a report and verify it" in handoff
+    assert "report creation verified" in handoff
+    assert "created report.pdf" in handoff
+    assert "Do not restart completed work" in handoff
+    assert adapter.expected_urls == ["", "https://chatgpt.com/c/fresh-task"]
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_does_not_roll_over_twice_for_repeated_context_limit():
+    adapter = FakeAdapter([
+        WebChatContextLimitError("limit one"),
+        WebChatContextLimitError("limit two"),
+    ])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    with pytest.raises(WebChatContextLimitError):
+        await client.chat_with_tools(
+            messages=[{"role": "user", "content": "Continue task"}], tools=[],
+        )
+    assert adapter.new_chat_calls == 1
+    assert len(adapter.prompts) == 2
 
 
 @pytest.mark.anyio
@@ -311,3 +364,131 @@ def test_web_chat_client_rejects_mismatched_durable_run():
     )
     with pytest.raises(RuntimeError, match="does not match"):
         client.bind_durable_run(SimpleNamespace(run_id="different-run"))
+
+
+def test_web_chat_catalog_is_bounded_and_prioritizes_task_relevant_tools():
+    from app.agent.web_chat.llm_client import (
+        WEB_CHAT_TOOL_CATALOG_MAX_BYTES,
+        _select_web_chat_tool_catalog,
+    )
+
+    tools = [
+        {
+            "name": f"unrelated.tool_{index}",
+            "description": "Large unrelated description " * 200,
+            "parameters": {"type": "object", "properties": {"unused": {"type": "string", "description": "x" * 200}}},
+        }
+        for index in range(80)
+    ]
+    tools.append({
+        "name": "terminal.execute",
+        "description": "Run a PowerShell command in the terminal",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string", "description": "Command to execute"}},
+            "required": ["command"],
+        },
+    })
+
+    catalog = _select_web_chat_tool_catalog(tools, "Run a PowerShell command")
+    encoded = __import__("json").dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+    assert len(encoded.encode("utf-8")) <= WEB_CHAT_TOOL_CATALOG_MAX_BYTES
+    assert catalog[0]["name"] == "terminal.execute"
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_handles_large_global_catalog_by_sending_relevant_subset():
+    adapter = FakeAdapter([action()])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    tools = [
+        {
+            "name": f"unrelated.tool_{index}",
+            "description": "Unrelated long description " * 100,
+            "parameters": {"type": "object", "properties": {"unused": {"type": "string"}}},
+        }
+        for index in range(100)
+    ]
+    tools.append({
+        "name": "terminal.execute",
+        "description": "Run a PowerShell command",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    })
+    response = await client.chat_with_tools(
+        messages=[{"role": "user", "content": "Run a PowerShell command"}],
+        tools=tools,
+    )
+    assert response.finish_reason == "tool_calls"
+    assert "terminal.execute" in adapter.prompts[0][1]
+    assert "unrelated.tool_99" not in adapter.prompts[0][1]
+
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_keeps_original_goal_when_internal_browser_guidance_follows_tool_result():
+    adapter = FakeAdapter(["The captured answer is ready."])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    user = {"role": "user", "content": "Read the latest ChatGPT response"}
+    result = {
+        "role": "user",
+        "content": "AgentOS tool result for embedded_browser_conversation: pageText=Captured answer",
+        "tool_result": True,
+        "web_chat_action_result": True,
+    }
+    internal_hint = {
+        "role": "user",
+        "content": "Browser workflow guidance: The latest exchange is already captured. Answer now.",
+        "agentos_internal_context": True,
+    }
+
+    response = await client.chat_with_tools(
+        messages=[user, result, internal_hint],
+        tools=[],
+    )
+
+    assert response.content == "The captured answer is ready."
+    assert "Original AgentOS request:" in adapter.prompts[0][1]
+    assert "Read the latest ChatGPT response" in adapter.prompts[0][1]
+    assert "Browser workflow guidance:" not in adapter.prompts[0][1]
+
+
+@pytest.mark.anyio
+async def test_web_chat_client_never_dispatches_a_conversation_read_twice_after_capture():
+    def read_action(action_id):
+        payload = {
+            "protocol": "agentos.v1",
+            "type": "action",
+            "id": action_id,
+            "action": "embedded_browser_conversation",
+            "arguments": {},
+        }
+        import json
+        return FENCE + "json\n" + json.dumps(payload) + "\n" + FENCE
+
+    adapter = FakeAdapter([
+        read_action("read-1"),
+        read_action("read-2"),
+    ])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    tools = [{
+        "name": "embedded_browser_conversation",
+        "description": "Read the active embedded AI conversation",
+        "parameters": {"type": "object", "properties": {}},
+    }]
+    user = {"role": "user", "content": "Read the response in the browser"}
+    first = await client.chat_with_tools(messages=[user], tools=tools)
+    assert first.finish_reason == "tool_calls"
+    result_one = {
+        "role": "user",
+        "content": "AgentOS tool result for embedded_browser_conversation: captureSource=visible_page_text_fallback; pageText=answer",
+        "tool_result": True,
+        "web_chat_action_result": True,
+    }
+    second = await client.chat_with_tools(messages=[user, result_one], tools=tools)
+    assert second.finish_reason == "stop"
+    assert "safely stopped" in second.content
+    assert "pageText=answer" in second.content
+    assert len(adapter.prompts) == 2

@@ -135,10 +135,21 @@ class Database:
         self, *, limit: int | None = None, offset: int = 0, search: str = "",
         before_updated_at: str = "", before_id: str = "",
     ) -> list[dict]:
-        """Delegate paged history reads without exposing the shared connection."""
+        """List live conversations, excluding entries moved to Trash."""
         return ConversationHistory(self).list(
             limit=limit, offset=offset, search=search,
             before_updated_at=before_updated_at, before_id=before_id,
+        )
+
+    def list_deleted_conversations(
+        self, *, limit: int | None = None, offset: int = 0, search: str = "",
+        before_updated_at: str = "", before_id: str = "",
+    ) -> list[dict]:
+        """List soft-deleted conversations while preserving their Run evidence."""
+        return ConversationHistory(self).list(
+            limit=limit, offset=offset, search=search,
+            before_updated_at=before_updated_at, before_id=before_id,
+            deleted_only=True,
         )
 
     def get_conversation(self, conv_id: str) -> dict | None:
@@ -161,7 +172,32 @@ class Database:
             self.conn.execute(f"UPDATE conversations SET {sets} WHERE id = ?", vals)
             self.conn.commit()
 
+    def soft_delete_conversation(self, conv_id: str) -> bool:
+        """Move a conversation to Trash without cascading its durable Run history."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self.transaction() as conn:
+            updated = conn.execute(
+                """UPDATE conversations
+                   SET deleted_at = ?, updated_at = ?
+                   WHERE id = ? AND deleted_at IS NULL""",
+                (now, now, conv_id),
+            )
+            return updated.rowcount > 0
+
+    def restore_conversation(self, conv_id: str) -> bool:
+        """Restore a trashed conversation with its original messages and Run journal."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self.transaction() as conn:
+            updated = conn.execute(
+                """UPDATE conversations
+                   SET deleted_at = NULL, updated_at = ?
+                   WHERE id = ? AND deleted_at IS NOT NULL""",
+                (now, conv_id),
+            )
+            return updated.rowcount > 0
+
     def delete_conversation(self, conv_id: str) -> bool:
+        """Permanently delete only when no active or unresolved Run evidence remains."""
         now = datetime.now(timezone.utc).isoformat()
         reclaim_refs: set[str] = set()
         with self.transaction() as conn:
@@ -177,7 +213,7 @@ class Database:
                    WHERE r.conversation_id = ?
                      AND (
                        r.status IN (
-                           'running', 'waiting_approval', 'pausing', 'paused',
+                           'running', 'waiting_approval', 'pausing',
                            'interrupted', 'needs_review'
                        )
                        OR EXISTS (
