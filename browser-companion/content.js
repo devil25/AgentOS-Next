@@ -15,6 +15,7 @@
   let nextNodeId = 0;
   let sequence = 0;
   let lastPublishedSignature = '';
+  let lastObservedSignature = '';
   let lastPublishedAt = 0;
   let lastChangeAt = Date.now();
   let timer = null;
@@ -104,7 +105,7 @@
       const text = textOf(content);
       if (!text) continue;
       const id = stableId(node);
-      const key = role + ':' + id + ':' + text;
+      const key = role + ':' + id;
       if (seen.has(key)) continue;
       seen.add(key);
       result.push({ message_id: id, role, text, complete: true });
@@ -126,7 +127,10 @@
       messages: messages.map(item => [item.message_id, item.role, item.text]),
       generating, composerReady: Boolean(composer), loginRequired: passwordVisible
     });
-    if (signature !== lastPublishedSignature) lastChangeAt = Date.now();
+    if (signature !== lastObservedSignature) {
+      lastObservedSignature = signature;
+      lastChangeAt = Date.now();
+    }
     const stableForMs = Math.max(0, Date.now() - lastChangeAt);
     const stable = !generating && stableForMs >= 900;
     const completeMessages = collectMessages(nodes, generating, stable);
