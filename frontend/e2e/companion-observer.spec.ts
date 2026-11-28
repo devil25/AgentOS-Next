@@ -11,10 +11,17 @@ test('Playwright verifies companion streaming and completed-response events in C
     body: '<!doctype html><html><head><title>ChatGPT observer fixture</title></head><body><main><div data-message-author-role="user" data-message-id="user-1">Run observer test</div><div data-message-author-role="assistant" data-message-id="assistant-1"><div data-markdown-text-style="assistant-message">Earlier reply</div></div><textarea placeholder="Message"></textarea></main></body></html>',
   }))
   const providerWindow = app.waitForEvent('window')
-  const windowId = await app.evaluate(({ BrowserWindow }) => new BrowserWindow({
-    show: false,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
-  }).id)
+  const windowId = await app.evaluate(({ BrowserWindow }) => {
+    const window = new BrowserWindow({
+      show: false,
+      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
+    })
+    // Electron's Playwright adapter exposes a Page after the BrowserWindow
+    // creates its renderer; a newly constructed, never-navigated window has
+    // no renderer Page for waitForEvent('window') to resolve.
+    void window.loadURL('about:blank')
+    return window.id
+  })
   const providerPage = await providerWindow
   try {
     await providerPage.addInitScript(() => {
