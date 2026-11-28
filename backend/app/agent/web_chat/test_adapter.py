@@ -290,6 +290,14 @@ async def test_embedded_stable_snapshot_browser_uses_one_post_submit_read():
     class StableSnapshotBrowser(FakeBrowser):
         provides_stable_snapshots = True
 
+        def __init__(self, snapshots):
+            super().__init__(snapshots)
+            self.inspect_calls = 0
+
+        async def inspect(self, tab_id):
+            self.inspect_calls += 1
+            return await super().inspect(tab_id)
+
     old = AssistantMessage("old", "Earlier response", True)
     new = AssistantMessage("new", "A completed response", True)
     browser = StableSnapshotBrowser([snapshot([old]), snapshot([old, new])])
@@ -299,4 +307,4 @@ async def test_embedded_stable_snapshot_browser_uses_one_post_submit_read():
 
     assert turn.assistant_message.message_id == "new"
     assert browser.submitted == [(12, "Do work")]
-    assert browser.snapshots == []
+    assert browser.inspect_calls == 2
