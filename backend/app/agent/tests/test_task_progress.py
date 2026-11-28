@@ -9,6 +9,7 @@ import pytest
 from app.agent.database import Database
 from app.agent.harness.progress_monitor import ProgressMonitor
 from app.agent.harness.task_progress import TaskProgress
+from app.agent.harness.task_tools import TaskToolRegistry
 from app.agent.harness.tool_protocol import ToolCallResult
 from app.agent.llm_client import LLMResponse, ToolCallRequest
 from app.agent.memory_manager import MemoryManager
@@ -62,6 +63,43 @@ def record_write(progress, context, path, content, *, claimed_path=None):
         ),
         context["run"],
     )
+
+
+def test_task_plan_publishes_waiting_user_state_only_after_persisting(native_context):
+    """The UI receives the durable plan state, not an inferred approval guess."""
+    context = native_context
+    progress = TaskProgress(
+        context["db"], "chat-native-file-integration", "Inspect desktop", str(context["root"])
+    )
+    events = []
+    registry = TaskToolRegistry(ToolRegistry(), progress, on_update=events.append)
+    tool = registry.get_tool("task_plan")
+
+    result = asyncio.run(tool["callable"](
+        steps=[{
+            "id": "desktop",
+            "description": "Determine the Windows desktop path",
+            "criteria": "Identify the path without changing files",
+            "kind": "general",
+        }],
+        status="waiting_user",
+        reason="Waiting for approval before proceeding.",
+    ))
+
+    payload = json.loads(result)
+    assert payload["status"] == "ok"
+    assert payload["task"]["status"] == "waiting_user"
+    assert len(events) == 1
+    assert events[0]["task_id"] == payload["task"]["task_id"]
+    assert events[0]["steps"][0]["description"] == "Determine the Windows desktop path"
+
+    rejected = asyncio.run(tool["callable"](
+        steps=[],
+        status="waiting_user",
+        reason="",
+    ))
+    assert json.loads(rejected)["status"] == "error"
+    assert len(events) == 1
 
 
 def test_task_retains_all_outcomes_and_verified_evidence_after_database_reopen(native_context):
