@@ -380,7 +380,8 @@ async def test_embedded_browser_conversation_waits_for_new_assistant_reply(monke
     monkeypatch.setattr(tools.asyncio, "sleep", no_wait)
     result = json.loads(await tools.embedded_browser_conversation())
 
-    assert len(calls) == 2
+    # One pending sample plus three identical completed samples for stability.
+    assert len(calls) == 4
     assert result["ok"] is True
     assert result["messages"][-1]["text"] == "completed answer"
     assert "reason_code" not in result
