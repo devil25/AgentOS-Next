@@ -180,11 +180,15 @@ export const MessageBubble = memo(function MessageBubble({
     [hasBody, message],
   )
   const runStatus = message.streaming ? 'streaming' : message.runStatus ?? 'complete'
+  const awaitingUser = message.taskProgress?.status === 'waiting_user'
+    || message.taskProgress?.status === 'blocked'
   const mascotSrc = runStatus === 'streaming' ? mascotThinking
-    : runStatus === 'complete' ? mascotSuccess
-      : runStatus === 'error' ? mascotAlert : mascotCurious
+    : awaitingUser ? mascotCurious
+      : runStatus === 'complete' ? mascotSuccess
+        : runStatus === 'error' ? mascotAlert : mascotCurious
   const mascotStillSrc = runStatus === 'streaming' ? mascotThinkingStill
-    : runStatus === 'complete' ? mascotSuccessStill : mascotAlertStill
+    : awaitingUser ? mascotThinkingStill
+      : runStatus === 'complete' ? mascotSuccessStill : mascotAlertStill
   const activityItems: ActivityItem[] = message.activityItems ?? message.toolCalls?.map((toolCall, index) => ({
     id: toolCall.id || `${toolCall.tool}-${index}`,
     type: 'tool' as const,
@@ -216,6 +220,34 @@ export const MessageBubble = memo(function MessageBubble({
         <p className={runStatus === 'error' ? 'text-xs text-red-300' : 'text-xs text-amber-300'}>
           {runStatus === 'error' ? 'Stopped with an error' : 'Paused'}
         </p>
+      )}
+
+      {awaitingUser && message.taskProgress && (
+        <section
+          aria-label="Task plan status"
+          className="space-y-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-xs"
+          role="status"
+        >
+          <p className="font-semibold text-amber-200">
+            {message.taskProgress.status === 'waiting_user'
+              ? 'Waiting for your approval or response'
+              : 'Your input is needed to continue'}
+          </p>
+          {message.taskProgress.reason && (
+            <p className="leading-relaxed text-neutral-300">{message.taskProgress.reason}</p>
+          )}
+          {message.taskProgress.steps.length > 0 && (
+            <ol className="list-decimal space-y-1 pl-5 text-neutral-300">
+              {message.taskProgress.steps.map((step) => (
+                <li key={step.step_id}>
+                  <span>{step.description}</span>
+                  {step.criteria && <span className="ml-1 text-neutral-500">— {step.criteria}</span>}
+                </li>
+              ))}
+            </ol>
+          )}
+          <p className="text-neutral-500">Reply in the chat when you are ready to continue. No pending steps will run before then.</p>
+        </section>
       )}
 
       {message.approvals && message.approvals.length > 0 && (

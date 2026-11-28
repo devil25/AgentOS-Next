@@ -25,19 +25,21 @@ Only set new_task=true when the user has explicitly replaced the task with a new
 class TaskToolRegistry(ToolRegistry):
     """Overlay a private tool while retaining live discovery on the base registry."""
 
-    def __init__(self, base, progress):
+    def __init__(self, base, progress, on_update=None):
         """Bind task updates to this conversation without mutating shared tools."""
         self.base = base
 
         async def update(steps, status=None, reason=None, new_task=False):
             """Return a bounded validation error without discarding current work."""
             try:
-                return json.dumps(
-                    {
-                        "status": "ok",
-                        "task": progress.update(steps, status=status, reason=reason, new_task=new_task),
-                    }
-                )
+                task = progress.update(steps, status=status, reason=reason, new_task=new_task)
+                if callable(on_update):
+                    try:
+                        on_update(task)
+                    except Exception:
+                        # A notification failure must not turn a committed plan into a failed tool result.
+                        pass
+                return json.dumps({"status": "ok", "task": task})
             except ValueError as exc:
                 return json.dumps(
                     {

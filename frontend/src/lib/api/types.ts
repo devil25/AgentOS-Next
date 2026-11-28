@@ -924,6 +924,22 @@ export interface PlanEvent {
   steps: PlanStep[]
 }
 
+export interface TaskProgressStepEvent {
+  step_id: string
+  description: string
+  criteria: string
+  kind: 'file_change' | 'general' | 'answer'
+  status: 'pending' | 'active' | 'done' | 'failed'
+  reason?: string
+}
+
+export interface TaskProgressEvent {
+  task_id: string
+  status: 'working' | 'waiting_user' | 'blocked' | 'complete'
+  reason?: string
+  steps: TaskProgressStepEvent[]
+}
+
 export interface StepEvent {
   step_id: string
   description?: string

@@ -483,7 +483,33 @@ class TurnLoop:
                     conversation_id, message, selected_workspace_dir(), continuation=lifecycle.is_continuation,
                 )
                 tool_runner.task_progress = task_progress
-                tool_runner.registry = TaskToolRegistry(self.registry, task_progress)
+
+                def publish_task_progress(task: dict) -> None:
+                    """Publish only the user-facing plan state, never private evidence or paths."""
+                    _put({
+                        "event": "task_progress",
+                        "data": {
+                            "task_id": str(task.get("task_id") or ""),
+                            "status": str(task.get("status") or "working"),
+                            "reason": str(task.get("reason") or ""),
+                            "steps": [
+                                {
+                                    "step_id": str(step.get("id") or ""),
+                                    "description": str(step.get("description") or ""),
+                                    "criteria": str(step.get("criteria") or ""),
+                                    "kind": str(step.get("kind") or "general"),
+                                    "status": str(step.get("status") or "pending"),
+                                    "reason": str(step.get("reason") or ""),
+                                }
+                                for step in task.get("steps", [])
+                                if isinstance(step, dict)
+                            ],
+                        },
+                    })
+
+                tool_runner.registry = TaskToolRegistry(
+                    self.registry, task_progress, on_update=publish_task_progress,
+                )
             self.memory.set_task_goal(conversation_id, task_progress.data["goal"] if task_progress else message)
             self.memory.set_active_task(conversation_id, None)
             if unfinished_workers(conversation_id):

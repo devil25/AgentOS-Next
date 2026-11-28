@@ -40,6 +40,31 @@ describe('chat stream completion', () => {
     })
   })
 
+  it('dispatches structured task progress updates', async () => {
+    const event = {
+      task_id: 'task-a',
+      status: 'waiting_user',
+      reason: 'Approve before continuing.',
+      steps: [{
+        step_id: 'step-a',
+        description: 'Inspect the desktop path',
+        criteria: 'No file changes',
+        kind: 'general',
+        status: 'pending',
+      }],
+    }
+    vi.mocked(apiFetch).mockResolvedValue(new Response(
+      `event: task_progress\ndata: ${JSON.stringify(event)}\n\nevent: done\ndata: {"status":"complete"}\n\n`,
+    ))
+    const onTaskProgress = vi.fn()
+    chatStream(
+      'Prepare a plan', null, [], vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn(),
+      ...Array.from({ length: 21 }, () => undefined),
+      onTaskProgress,
+    )
+    await vi.waitFor(() => expect(onTaskProgress).toHaveBeenCalledWith(event))
+  })
+
   it.each([false, true])('requires a terminal event to report success (completed: %s)', async (completed) => {
     const token = 'event: token\ndata: {"content":"Partial answer"}\n\n'
     const done = 'event: done\ndata: {"conversation_id":"chat-a","status":"complete"}\n\n'

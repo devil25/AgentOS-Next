@@ -40,6 +40,32 @@ describe('MessageBubble', () => {
     expect(screen.getByRole('img', { name: 'AgentOS-Next mascot' })).toHaveAttribute('src', expect.stringMatching(/success\.gif/))
   })
 
+  it('clearly shows a task plan waiting for user approval without running its steps', () => {
+    render(<MessageBubble message={{
+      id: 'waiting-plan',
+      role: 'assistant',
+      content: 'The plan is ready.',
+      taskProgress: {
+        task_id: 'task-1',
+        status: 'waiting_user',
+        reason: 'Please approve before I inspect the desktop.',
+        steps: [{
+          step_id: 'step-1',
+          description: 'Determine the Windows desktop path',
+          criteria: 'Identify the path without changing files',
+          kind: 'general',
+          status: 'pending',
+        }],
+      },
+    }} />)
+
+    const status = screen.getByRole('status', { name: 'Task plan status' })
+    expect(status).toHaveTextContent('Waiting for your approval or response')
+    expect(status).toHaveTextContent('Determine the Windows desktop path')
+    expect(status).toHaveTextContent('No pending steps will run before then')
+    expect(screen.getByRole('img', { name: 'AgentOS-Next mascot' })).toHaveAttribute('src', expect.stringMatching(/curious\.gif/))
+  })
+
   it('shows exact approval scope and preserves the request if approval fails', async () => {
     vi.mocked(approveTicket).mockRejectedValueOnce(new Error('Offline'))
     render(<MessageBubble message={{ id: 'exact', role: 'assistant', content: '', approvals: [{
