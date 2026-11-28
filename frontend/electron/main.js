@@ -1105,6 +1105,7 @@ function startEmbeddedBrowserBridge() {
               embeddedBrowserPendingSubmission = null
               snapshot.pendingSubmission = false
             }
+          }
           return send(200, snapshot)
         }
         const payload = body ? JSON.parse(body) : {}
