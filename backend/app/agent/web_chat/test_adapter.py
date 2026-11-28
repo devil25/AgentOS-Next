@@ -283,3 +283,20 @@ async def test_turn_allows_same_accessibility_history_when_provider_spa_url_chan
         expected_conversation_url="https://chatgpt.com/c/task-a",
     )
     assert turn.assistant_message.message_id == "stable-backend-node-202"
+
+
+@pytest.mark.anyio
+async def test_embedded_stable_snapshot_browser_uses_one_post_submit_read():
+    class StableSnapshotBrowser(FakeBrowser):
+        provides_stable_snapshots = True
+
+    old = AssistantMessage("old", "Earlier response", True)
+    new = AssistantMessage("new", "A completed response", True)
+    browser = StableSnapshotBrowser([snapshot([old]), snapshot([old, new])])
+    adapter = WebChatSessionAdapter(browser, poll_interval=0.1, timeout=5, stable_polls=3)
+
+    turn = await adapter.send_and_wait(tab_id=12, prompt="Do work", expected_provider="chatgpt")
+
+    assert turn.assistant_message.message_id == "new"
+    assert browser.submitted == [(12, "Do work")]
+    assert browser.snapshots == []

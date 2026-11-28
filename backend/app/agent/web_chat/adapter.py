@@ -89,7 +89,10 @@ class WebChatSessionAdapter:
         # A provider UI that reports "generating" forever must never trap a
         # durable AgentOS turn in a long polling loop.
         self.timeout = max(5.0, min(float(timeout), 60.0))
-        self.stable_polls = max(1, stable_polls)
+        # The embedded browser conversation tool performs its own bounded wait and
+        # stability confirmation. Re-reading it here would dispatch identical
+        # no-argument transport calls and trip the duplicate-call guard.
+        self.stable_polls = 1 if getattr(browser, "provides_stable_snapshots", False) else max(1, stable_polls)
         self.empty_generation_grace = max(0.1, min(float(empty_generation_grace), 15.0))
         self.on_conversation_url = on_conversation_url
 

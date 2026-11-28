@@ -19,6 +19,9 @@ AuthorizedToolExecutor = Callable[[str, dict[str, Any]], Any | Awaitable[Any]]
 
 class EmbeddedWebChatBrowserPort:
     """Provider-neutral conversation port for the single active embedded browser."""
+    # A single conversation read is already internally waited and stability-checked.
+    provides_stable_snapshots = True
+
 
     def __init__(self, provider: str, execute_tool: AuthorizedToolExecutor | None = None) -> None:
         if provider not in {"chatgpt", "gemini", "deepseek", "zai"}:

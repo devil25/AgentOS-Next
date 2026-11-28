@@ -751,8 +751,13 @@ def _embedded_conversation_reply_ready(payload: dict[str, Any]) -> bool:
     if bool(payload.get("generating")):
         return False
     if latest_user >= 0:
-        return latest_assistant > latest_user
-    return latest_assistant >= 0 or bool(str(payload.get("pageText") or "").strip())
+        if latest_assistant <= latest_user:
+            return False
+        assistant = messages[latest_assistant]
+        return assistant.get("complete", True) is True
+    if latest_assistant >= 0:
+        return messages[latest_assistant].get("complete", True) is True
+    return bool(str(payload.get("pageText") or "").strip())
 
 
 async def embedded_browser_conversation() -> str:
@@ -765,10 +770,33 @@ async def embedded_browser_conversation() -> str:
     try:
         payload: dict[str, Any] = {}
         deadline = asyncio.get_running_loop().time() + 30.0
+        last_ready_signature = ""
+        stable_ready_polls = 0
         while True:
             payload = await _embedded_browser_request("/v1/conversation")
             if _embedded_conversation_reply_ready(payload):
-                break
+                messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+                latest_assistant = next(
+                    (item for item in reversed(messages)
+                     if isinstance(item, dict) and str(item.get("role") or "").lower() == "assistant"
+                     and str(item.get("text") or "").strip()),
+                    None,
+                )
+                signature_source = latest_assistant or {"pageText": str(payload.get("pageText") or "")}
+                signature = json.dumps(signature_source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                if signature == last_ready_signature:
+                    stable_ready_polls += 1
+                else:
+                    last_ready_signature = signature
+                    stable_ready_polls = 1
+                # Confirm the same completed assistant content across three
+                # samples inside this one tool invocation. The outer adapter
+                # must not issue repeated identical no-argument reads.
+                if stable_ready_polls >= 3:
+                    break
+            else:
+                last_ready_signature = ""
+                stable_ready_polls = 0
             if bool(payload.get("loginRequired")) or str(payload.get("blockedReason") or "").strip():
                 break
             if asyncio.get_running_loop().time() >= deadline:
