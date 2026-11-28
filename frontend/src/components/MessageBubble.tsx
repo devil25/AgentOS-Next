@@ -187,7 +187,8 @@ export const MessageBubble = memo(function MessageBubble({
       : runStatus === 'complete' ? mascotSuccess
         : runStatus === 'error' ? mascotAlert : mascotCurious
   const mascotStillSrc = runStatus === 'streaming' ? mascotThinkingStill
-    : runStatus === 'complete' ? mascotSuccessStill : mascotAlertStill
+    : awaitingUser ? mascotThinkingStill
+      : runStatus === 'complete' ? mascotSuccessStill : mascotAlertStill
   const activityItems: ActivityItem[] = message.activityItems ?? message.toolCalls?.map((toolCall, index) => ({
     id: toolCall.id || `${toolCall.tool}-${index}`,
     type: 'tool' as const,
