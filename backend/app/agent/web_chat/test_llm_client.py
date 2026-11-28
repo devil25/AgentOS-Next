@@ -515,8 +515,10 @@ async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_afte
     }
     plan_result = {
         "role": "tool",
-        "content": "Task plan created with three execution steps.",
+        "content": "AgentOS tool result for task_plan: Task plan created with three execution steps.",
         "tool_result": True,
+        # The runner tags task_plan just like every other dispatched tool.
+        "web_chat_action_result": True,
     }
     response = await client.chat_with_tools(
         messages=[user, captured, plan_result],
