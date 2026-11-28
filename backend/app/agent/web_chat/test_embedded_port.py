@@ -125,7 +125,7 @@ async def test_embedded_port_submits_only_to_one_editable_composer():
                 ],
             })
         if name == "embedded_browser_press_key":
-            return _tool_result({"ok": True, "action": name, "submissionVerified": True})
+            return _tool_result({"ok": True, "action": name, "submissionAccepted": True})
         return _tool_result({"ok": True, "action": name})
 
     port = EmbeddedWebChatBrowserPort("chatgpt", execute)
@@ -186,7 +186,7 @@ async def test_embedded_port_chunks_long_prompts_without_losing_order():
 
 
 @pytest.mark.anyio
-async def test_embedded_port_stops_when_chatgpt_submission_is_not_confirmed():
+async def test_embedded_port_stops_when_chatgpt_send_action_is_not_acknowledged():
     calls = []
 
     async def execute(name, arguments):
@@ -202,12 +202,13 @@ async def test_embedded_port_stops_when_chatgpt_submission_is_not_confirmed():
         if name == "embedded_browser_press_key":
             return _tool_result({
                 "ok": True, "action": name, "submitted": "unverified_native_enter",
+                "submissionAccepted": False,
                 "submissionVerified": False,
             })
         return _tool_result({"ok": True, "action": name})
 
     port = EmbeddedWebChatBrowserPort("chatgpt", execute)
-    with pytest.raises(WebChatAdapterError, match="did not confirm"):
+    with pytest.raises(WebChatAdapterError, match="did not acknowledge"):
         await port.submit(1, "A test prompt")
 
     assert [name for name, _ in calls] == [
