@@ -456,7 +456,7 @@ async def test_web_chat_client_keeps_original_goal_when_internal_browser_guidanc
 
 
 @pytest.mark.anyio
-async def test_web_chat_client_never_dispatches_a_conversation_read_twice_after_capture():
+async def test_web_chat_client_allows_a_fresh_read_only_observation_after_capture():
     def read_action(action_id):
         payload = {
             "protocol": "agentos.v1",
@@ -488,7 +488,64 @@ async def test_web_chat_client_never_dispatches_a_conversation_read_twice_after_
         "web_chat_action_result": True,
     }
     second = await client.chat_with_tools(messages=[user, result_one], tools=tools)
-    assert second.finish_reason == "stop"
-    assert "safely stopped" in second.content
-    assert "pageText=answer" in second.content
+    assert second.finish_reason == "tool_calls"
+    assert second.tool_calls
+    assert second.tool_calls[0].tool_name == "embedded_browser_conversation"
     assert len(adapter.prompts) == 2
+
+@pytest.mark.anyio
+async def test_web_chat_client_reuses_capture_when_task_plan_result_arrives_after_it():
+    payload = {
+        "protocol": "agentos.v1",
+        "type": "action",
+        "id": "exec-after-plan",
+        "action": "exec",
+        "arguments": {"command": "Write-Output 'continue from the recorded plan'"},
+    }
+    import json
+    next_action = FENCE + "json\n" + json.dumps(payload) + "\n" + FENCE
+    adapter = FakeAdapter([next_action])
+    client = WebChatLLMClient(adapter, provider="chatgpt", tab_id=42)
+    user = {"role": "user", "content": "Create a folder, write a file, and verify it"}
+    captured = {
+        "role": "user",
+        "content": "AgentOS tool result for embedded_browser_conversation: pageText=Captured provider response",
+        "tool_result": True,
+        "web_chat_action_result": True,
+    }
+    plan_result = {
+        "role": "tool",
+        "content": "AgentOS tool result for task_plan: Task plan created with three execution steps.",
+        "tool_result": True,
+        # The runner tags task_plan just like every other dispatched tool.
+        "web_chat_action_result": True,
+    }
+    response = await client.chat_with_tools(
+        messages=[user, captured, plan_result],
+        tools=[
+            {
+                "name": "embedded_browser_conversation",
+                "description": "Read the active embedded AI conversation",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "exec",
+                "description": "Execute a local Windows command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
+            },
+        ],
+        system_prompt="TASK_PROTOCOL: execute each independent step and verify its result.",
+    )
+    assert response.finish_reason == "tool_calls"
+    assert response.tool_calls
+    assert response.tool_calls[0].tool_name == "exec"
+    assert response.tool_calls[0].arguments["command"] == "Write-Output 'continue from the recorded plan'"
+    assert "Task plan created" in adapter.prompts[0][1]
+    assert "TASK_PROTOCOL" in adapter.prompts[0][1]
+    assert '"name":"exec"' in adapter.prompts[0][1]
+    assert len(adapter.prompts) == 1
+

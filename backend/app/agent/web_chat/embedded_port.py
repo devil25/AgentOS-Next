@@ -16,12 +16,17 @@ from .protocol import provider_for_url
 
 AuthorizedToolExecutor = Callable[[str, dict[str, Any]], Any | Awaitable[Any]]
 
+# Electron exposes one active embedded provider view. All Runs must share this
+# lock so a second task cannot navigate or type while another task is awaiting
+# its provider response.
+_EMBEDDED_BROWSER_OPERATION_LOCK = asyncio.Lock()
+
 
 class EmbeddedWebChatBrowserPort:
     """Provider-neutral conversation port for the single active embedded browser."""
     # A single conversation read is already internally waited and stability-checked.
     provides_stable_snapshots = True
-
+    operation_lock = _EMBEDDED_BROWSER_OPERATION_LOCK
 
     def __init__(self, provider: str, execute_tool: AuthorizedToolExecutor | None = None) -> None:
         if provider not in {"chatgpt", "gemini", "deepseek", "zai"}:
@@ -178,7 +183,10 @@ class EmbeddedWebChatBrowserPort:
                 "index": index, "text": chunk, "append": chunk_index > 0,
             })
         submission = await self._call("embedded_browser_press_key", {"key": "Enter"})
-        if self.provider == "chatgpt" and submission.get("submissionVerified") is not True:
+        if self.provider == "chatgpt" and not (
+            submission.get("submissionAccepted") is True
+            or submission.get("submissionVerified") is True
+        ):
             raise WebChatAdapterError(
-                "ChatGPT did not confirm that the prompt was submitted; no response wait was started."
+                "ChatGPT did not acknowledge the send action; no response wait was started."
             )

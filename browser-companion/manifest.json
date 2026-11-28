@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AgentOS Browser Companion",
   "short_name": "AgentOS Companion",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Background conversation observer for AgentOS-Next embedded AI provider sessions.",
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -17,8 +17,16 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*", "https://gemini.google.com/*", "https://chat.deepseek.com/*", "https://chat.z.ai/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*",
+        "https://chat.deepseek.com/*",
+        "https://chat.z.ai/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

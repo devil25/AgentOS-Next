@@ -48,6 +48,27 @@ def test_single_registered_action_is_parsed():
     assert reply.action.name == "terminal.execute"
     assert reply.action.arguments == {"command": "Get-Date"}
 
+@pytest.mark.parametrize("response", [
+    'JSON{"protocol":"agentos.v1","type":"action","id":"step-json","action":"terminal.execute","arguments":{"command":"Get-Date"}}',
+    '{"protocol":"agentos.v1","type":"action","id":"step-bare","action":"terminal.execute","arguments":{"command":"Get-Date"}}',
+])
+def test_plain_json_action_with_optional_json_label_is_parsed(response):
+    reply = parse_web_chat_reply(response, allowed_actions=ALLOWED)
+    assert reply.kind == "action"
+    assert reply.action is not None
+    assert reply.action.name == "terminal.execute"
+    assert reply.action.arguments == {"command": "Get-Date"}
+
+
+@pytest.mark.parametrize("response", [
+    'JSON{"protocol":"agentos.v1","type":"action","id":"x","action":"terminal.execute","arguments":{}} trailing text',
+    'JSON{"protocol":"agentos.v1","type":"action","id":"x","action":"terminal.execute","arguments":{}} JSON{"protocol":"agentos.v1"}',
+    'Here is the action: JSON{"protocol":"agentos.v1","type":"action","id":"x","action":"terminal.execute","arguments":{}}',
+])
+def test_plain_json_action_rejects_trailing_or_surrounding_prose(response):
+    with pytest.raises(WebChatProtocolError):
+        parse_web_chat_reply(response, allowed_actions=ALLOWED)
+
 
 @pytest.mark.parametrize("response", [
     "",

@@ -115,8 +115,6 @@ class WebChatLLMClient:
         self._conversation_url = str(conversation_url or "")
         self.run_id = str(run_id or "")
         self._seen_action_ids: set[str] = set()
-        self._last_read_action_signature = ""
-        self._consecutive_read_action_count = 0
         self._call_lock = asyncio.Lock()
 
     def bind_durable_run(self, durable_run) -> None:
@@ -170,6 +168,19 @@ class WebChatLLMClient:
                  if isinstance(item, dict) and item.get("web_chat_action_result") is True),
                 None,
             )
+            # A task-plan result or internal progress message can arrive after the
+            # browser capture. Keep the capture independently discoverable instead
+            # of assuming the newest tool result is the browser read.
+            conversation_result = next(
+                (item for item in reversed(messages)
+                 if isinstance(item, dict)
+                 and "AgentOS tool result for embedded_browser_conversation:" in str(item.get("content") or "")),
+                None,
+            )
+            conversation_result_index = (
+                max((i for i, item in enumerate(messages) if item is conversation_result), default=-1)
+                if conversation_result is not None else -1
+            )
             latest_user = next(
                 (item for item in reversed(messages)
                  if isinstance(item, dict) and item.get("role") == "user" and not item.get("tool_result") and not item.get("agentos_internal_context")),
@@ -177,23 +188,37 @@ class WebChatLLMClient:
             )
             goal = str((latest_user or {}).get("content") or "").strip()
             catalog = _select_web_chat_tool_catalog(tools, goal) if tools and goal else []
-            if latest_result is not None:
+            if conversation_result is not None:
+                evidence_text = str(conversation_result.get("content") or "")
+                progress_items = [
+                    str(item.get("content") or "")[:4_000]
+                    for item in messages[conversation_result_index + 1:]
+                    if isinstance(item, dict) and item.get("tool_result")
+                    and item is not conversation_result
+                ][-4:]
+                progress_text = "\n\n".join(progress_items)
+                catalog_json = json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+                prompt = (
+                    "AgentOS has already captured the active embedded conversation. Treat this "
+                    "capture as durable evidence even if later task-plan/progress tool results appear "
+                    "after it in the transcript. You may request another read-only conversation "
+                    "observation whenever a fresh snapshot is useful; these reads are repeat-safe. "
+                    "Avoid unproductive identical reads and use the latest result when it is current. "
+                    "Continue the ORIGINAL task from the recorded plan and tool results; do not restart completed steps. "
+                    "If the capture has no assistant text or pageText, state that limitation and "
+                    "continue only with actions supported by the available evidence.\n\n"
+                    "Original AgentOS request:\n" + goal[:6000] + "\n\n"
+                    "AgentOS runtime policy and durable task protocol:\n" + system_prompt[:12000]
+                    + "\n\nAvailable AgentOS tools and authoritative argument schemas:\n" + catalog_json
+                    + "\n\nBounded browser evidence:\n" + evidence_text[:18000]
+                    + ("\n\nLatest AgentOS progress result:\n" + progress_text[:6000] if progress_text else "")
+                )
+            elif latest_result is not None:
                 result_text = str(latest_result.get("content") or "")
-                if "AgentOS tool result for embedded_browser_conversation:" in result_text:
-                    prompt = (
-                        "AgentOS has already completed one read of the active embedded conversation. "
-                        "Use the latest captured user/assistant exchange below to answer the ORIGINAL "
-                        "AgentOS request. Do not repeat the read or call embedded_browser_conversation "
-                        "again unless a new browser action changed the page. If the capture contains no "
-                        "assistant text or pageText, state that limitation clearly.\n\n"
-                        "Original AgentOS request:\n" + goal[:6000] + "\n\n"
-                        "Bounded browser evidence:\n" + result_text[:22000]
-                    )
-                else:
-                    prompt = (
-                        "Continue the same task using this actual AgentOS execution result:\n"
-                        + result_text + "\n\n" + action_instruction()
-                    )
+                prompt = (
+                    "Continue the same task using this actual AgentOS execution result:\n"
+                    + result_text + "\n\n" + action_instruction()
+                )
             else:
                 if not goal:
                     raise RuntimeError("The web-chat provider did not receive a user task.")
@@ -287,50 +312,10 @@ class WebChatLLMClient:
             action = reply.action
             if action is None:
                 raise RuntimeError("The web-chat response did not contain a valid AgentOS action.")
-            # A browser conversation read is a one-shot evidence capture. Once
-            # its result is in the transcript, a provider must summarize that
-            # evidence instead of asking AgentOS to execute the identical read
-            # again. Stop the repeated action here, before durable journaling
-            # or tool dispatch can turn it into repeated_tool_call_blocked.
-            if (
-                latest_result is not None
-                and "AgentOS tool result for embedded_browser_conversation:" in str(latest_result.get("content") or "")
-                and action.name == "embedded_browser_conversation"
-            ):
-                evidence = str(latest_result.get("content") or "")[:12_000]
-                final_text = (
-                    "The browser conversation was already read once. The provider repeated "
-                    "the same read request, so AgentOS safely stopped it instead of executing "
-                    "a duplicate. Captured evidence follows; do not treat missing fields as "
-                    "proof that the provider had no response.\n\n"
-                    + evidence
-                )
-                if stream_callback is not None:
-                    await stream_callback(final_text)
-                return LLMResponse(content=final_text, finish_reason="stop")
+            # Read-only conversation refreshes are allowed. ToolPolicy permits
+            # repeated observations, while the shared Run progress guard stops
+            # an unproductive loop without blocking a genuinely fresh read.
             call_id = action.action_id
-            # A new action ID must not let the provider spin forever on the
-            # same empty conversation read. Count consecutive identical reads
-            # by action name and arguments, independently of provider IDs.
-            if action.name == "embedded_browser_conversation":
-                signature = json.dumps(
-                    {"action": action.name, "arguments": action.arguments},
-                    sort_keys=True, ensure_ascii=False, separators=(",", ":"),
-                )
-                if signature == self._last_read_action_signature:
-                    self._consecutive_read_action_count += 1
-                else:
-                    self._last_read_action_signature = signature
-                    self._consecutive_read_action_count = 1
-                if self._consecutive_read_action_count > 2:
-                    raise RuntimeError(
-                        "The web-chat provider repeated embedded_browser_conversation "
-                        "without making progress. The repeated read was stopped; "
-                        "use the latest captured messages/pageText or report the capture limitation."
-                    )
-            else:
-                self._last_read_action_signature = ""
-                self._consecutive_read_action_count = 0
             if call_id in self._seen_action_ids:
                 raise RuntimeError("The web-chat provider repeated an action ID; duplicate execution was blocked.")
             if self.run_id:
