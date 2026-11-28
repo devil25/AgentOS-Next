@@ -178,6 +178,7 @@ try {
             "c7b0c6b9" = "Superseded by 12fb571c: invalid U+201C in explicit_tool_scope.py"
             "181f7676" = "Superseded by 12fb571c: invalid U+201C in explicit_tool_scope.py"
             "ac80966a" = "Superseded by 12fb571c: invalid U+201C in explicit_tool_scope.py"
+            "240e0580" = "Superseded by 1e11f9bd: missing closing quote in a continuation regression-test assertion"
         }
         if ($knownHistoricalFailures.ContainsKey($short)) {
             $reason = $knownHistoricalFailures[$short]
