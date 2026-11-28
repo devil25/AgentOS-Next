@@ -104,8 +104,8 @@ def parse_web_chat_reply(response: str, *, allowed_actions: set[str] | frozenset
         # fences. Accept only that exact wrapper or a bare object; never scan
         # arbitrary prose for an embedded action.
         candidate = text
-        if re.match(r"(?i)^json\\s*\\{", candidate):
-            candidate = re.sub(r"(?i)^json\\s*", "", candidate, count=1)
+        if re.match(r"(?i)^json\s*\{", candidate):
+            candidate = re.sub(r"(?i)^json\s*", "", candidate, count=1)
         if candidate.lstrip().startswith("{"):
             json_text = candidate
         else:
