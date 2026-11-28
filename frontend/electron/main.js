@@ -1059,8 +1059,7 @@ function startEmbeddedBrowserBridge() {
             snapshot.captureSource = 'dom'
           }
           if (pending && pending.provider === snapshot.provider
-            && pending.origin === new URL(activeUrl).origin
-            && Date.now() - pending.submittedAt < 120000) {
+            && pending.origin === new URL(activeUrl).origin) {
             const expected = String(pending.textPrefix || '').trim()
             const messages = Array.isArray(snapshot.messages) ? snapshot.messages : []
             const normalizeMessageText = value => String(value || '').replace(/\s+/g, ' ').trim()
