@@ -263,11 +263,13 @@ test('embedded companion extension is packaged and loaded into each persistent p
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../../browser-companion/manifest.json'), 'utf8'))
   const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'))
   assert.equal(manifest.manifest_version, 3)
+  assert.equal(manifest.version, '1.1.0')
   assert.ok(manifest.content_scripts.some(item => item.matches.includes('https://chatgpt.com/*')))
   assert.ok(manifest.content_scripts.some(item => item.matches.includes('https://gemini.google.com/*')))
   assert.ok(packageJson.build.extraResources.some(item => item.to === 'browser-companion'))
   assert.match(main, /browserSession\.extensions/)
   assert.match(main, /ensureEmbeddedCompanion\(browserSession\)/)
+  assert.match(main, /loadedCompanion\.version !== companionManifest\.version/)
   assert.match(main, /embeddedCompanionLoadedSessions/)
 })
 
