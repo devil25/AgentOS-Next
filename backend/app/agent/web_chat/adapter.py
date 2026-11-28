@@ -247,7 +247,13 @@ class WebChatSessionAdapter:
                 empty_generation_since = None
             candidates = [
                 item for item in current.messages
-                if item.role == "assistant" and item.message_id not in previous_ids and item.text.strip()
+                if item.role == "assistant"
+                and item.message_id not in previous_ids
+                and item.text.strip()
+                # A provider may recreate DOM identities during a rerender.
+                # Do not mistake a re-identified copy of an old reply for the
+                # response to the prompt that was just submitted.
+                and item.text.strip() not in previous_assistant_texts
             ]
             if not candidates or current.generating:
                 last_candidate = None
